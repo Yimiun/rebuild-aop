@@ -1,6 +1,11 @@
 package io.yuan.pulsar.handlers.amqp.amqp.component;
 
+import org.apache.pulsar.broker.service.Topic;
+
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 public abstract class AbstractExchange implements Exchange{
 
@@ -10,6 +15,10 @@ public abstract class AbstractExchange implements Exchange{
     protected final boolean autoDelete;
     protected final boolean internal;
     protected Map<String, Object> arguments;
+    protected volatile State exchangeState = State.Closed;
+    protected final Map<String, List<Topic>> routerMap = new ConcurrentHashMap<>();
+    protected static final AtomicReferenceFieldUpdater<AbstractExchange, State> stateReference =
+        AtomicReferenceFieldUpdater.newUpdater(AbstractExchange.class, State.class, "exchangeState");
 
     AbstractExchange(String exchangeName, Type type, boolean durable,
                        boolean autoDelete, boolean internal, Map<String, Object> arguments) {

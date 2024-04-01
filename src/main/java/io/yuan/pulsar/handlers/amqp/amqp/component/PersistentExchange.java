@@ -16,6 +16,7 @@ public class PersistentExchange extends AbstractExchange {
                        boolean autoDelete, boolean internal, Map<String, Object> arguments) {
         super(exchangeName, type, durable, autoDelete, internal, arguments);
         this.topic = persistentTopic;
+        stateReference.compareAndSet(this, State.Closed, State.Initializing);
     }
 
     @Override
@@ -25,9 +26,7 @@ public class PersistentExchange extends AbstractExchange {
 
     @Override
     public CompletableFuture<Position> writeToTopic(ByteBuf buf) {
-        topic.getManagedLedger().getCursors().forEach(managedCursor -> {
-//            managedCursor.getReadPosition();
-        });
+
         return null;
     }
 
