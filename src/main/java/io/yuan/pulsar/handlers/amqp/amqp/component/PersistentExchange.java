@@ -1,6 +1,7 @@
 package io.yuan.pulsar.handlers.amqp.amqp.component;
 
 import io.netty.buffer.ByteBuf;
+import io.yuan.pulsar.handlers.amqp.amqp.binding.BindData;
 import org.apache.bookkeeper.mledger.Position;
 import org.apache.pulsar.broker.service.Topic;
 import org.apache.pulsar.broker.service.persistent.PersistentTopic;
@@ -8,15 +9,16 @@ import org.apache.pulsar.broker.service.persistent.PersistentTopic;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * 所有方法前都需要加入CAS状态判断
+ * */
 public class PersistentExchange extends AbstractExchange {
 
-    private final PersistentTopic topic;
+    public PersistentExchange(PersistentTopic topic, String exchangeName, Type type, boolean durable,
+                              boolean autoDelete, boolean internal, BindData bindData,
+                              Map<String, Object> arguments) {
+        super(exchangeName, type, durable, autoDelete, internal, bindData, arguments, topic);
 
-    PersistentExchange(String exchangeName, Type type, PersistentTopic persistentTopic, boolean durable,
-                       boolean autoDelete, boolean internal, Map<String, Object> arguments) {
-        super(exchangeName, type, durable, autoDelete, internal, arguments);
-        this.topic = persistentTopic;
-        stateReference.compareAndSet(this, State.Closed, State.Initializing);
     }
 
     @Override
@@ -30,8 +32,5 @@ public class PersistentExchange extends AbstractExchange {
         return null;
     }
 
-    @Override
-    public CompletableFuture<Boolean> close() {
-        return null;
-    }
+
 }

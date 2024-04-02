@@ -23,11 +23,11 @@ public class TopicService {
     public static final String PERSISTENT_DOMAIN = TopicDomain.persistent.value() + "://";
     public static final String NON_PERSISTENT_DOMAIN = TopicDomain.non_persistent.value() + "://";
 
-    MetadataService metadataService;
+    private MetadataService metadataService;
 
     private final PulsarService pulsarService;
 
-    TopicService(MetadataService metadataService, PulsarService pulsarService) {
+    public TopicService(MetadataService metadataService, PulsarService pulsarService) {
         this.metadataService = metadataService;
         this.pulsarService = pulsarService;
     }
@@ -84,19 +84,19 @@ public class TopicService {
         }
     }
 
-    public static String getPulsarTopicName(String mqttTopicName, String defaultTenant, String defaultNamespace,
+    public static String getPulsarTopicName(String amqpTopicName, String defaultTenant, String defaultNamespace,
                                             boolean urlEncoded, TopicDomain topicDomain) {
-        if (mqttTopicName.startsWith(PERSISTENT_DOMAIN)
-            || mqttTopicName.startsWith(NON_PERSISTENT_DOMAIN)) {
-            List<String> parts = Splitter.on("://").limit(2).splitToList(mqttTopicName);
+        if (amqpTopicName.startsWith(PERSISTENT_DOMAIN)
+            || amqpTopicName.startsWith(NON_PERSISTENT_DOMAIN)) {
+            List<String> parts = Splitter.on("://").limit(2).splitToList(amqpTopicName);
             if (parts.size() < 2) {
-                throw new IllegalArgumentException("Invalid topic name: " + mqttTopicName);
+                throw new IllegalArgumentException("Invalid topic name: " + amqpTopicName);
             }
             String domain = parts.get(0);
             String rest = parts.get(1);
             parts = Splitter.on("/").limit(3).splitToList(rest);
             if (parts.size() < 3) {
-                throw new IllegalArgumentException("Invalid topic name: " + mqttTopicName);
+                throw new IllegalArgumentException("Invalid topic name: " + amqpTopicName);
             }
             String tenant = parts.get(0);
             String namespace = parts.get(1);
@@ -105,7 +105,7 @@ public class TopicService {
                 urlEncoded ? URLEncoder.encode(localName) : localName).toString();
         } else {
             return TopicName.get(topicDomain.value(), defaultTenant, defaultNamespace,
-                URLEncoder.encode(mqttTopicName)).toString();
+                URLEncoder.encode(amqpTopicName)).toString();
         }
     }
 }

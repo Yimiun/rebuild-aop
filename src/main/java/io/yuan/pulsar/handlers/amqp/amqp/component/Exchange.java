@@ -51,5 +51,7 @@ public interface Exchange {
 
     CompletableFuture<Position> writeToTopic(ByteBuf buf);
 
-    CompletableFuture<Boolean> close();
+    CompletableFuture<Void> close();
+
+    CompletableFuture<Void> start();
 }

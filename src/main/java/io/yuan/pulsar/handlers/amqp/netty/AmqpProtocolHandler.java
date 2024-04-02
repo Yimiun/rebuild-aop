@@ -3,11 +3,13 @@ package io.yuan.pulsar.handlers.amqp.netty;
 import com.google.common.collect.ImmutableMap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
+import io.yuan.pulsar.handlers.amqp.amqp.service.TopicService;
 import io.yuan.pulsar.handlers.amqp.broker.AmqpBrokerService;
 import io.yuan.pulsar.handlers.amqp.broker.EventManager;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
 import io.yuan.pulsar.handlers.amqp.configuration.ProxyConfiguration;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
+import io.yuan.pulsar.handlers.amqp.metadata.MetadataServiceImpl;
 import io.yuan.pulsar.handlers.amqp.proxy.ProxyService;
 import io.yuan.pulsar.handlers.amqp.utils.ConfigurationUtils;
 import io.yuan.pulsar.handlers.amqp.utils.ipUtils.IpFilter;
@@ -52,6 +54,8 @@ public class AmqpProtocolHandler implements ProtocolHandler {
     private Server webServer;
     @Getter
     private EventManager eventManager;
+    private TopicService topicService;
+    private MetadataService metadataService;
 
     @Override
     public String protocolName() {
@@ -90,7 +94,9 @@ public class AmqpProtocolHandler implements ProtocolHandler {
         brokerService = service;
         eventManager = new EventManager(brokerService.getPulsar().getLocalMetadataStore(), amqpConfig);
         eventManager.start();
-        amqpBrokerService = new AmqpBrokerService(service.getPulsar(), amqpConfig);
+        metadataService = new MetadataServiceImpl(service.pulsar().getLocalMetadataStore());
+        topicService = new TopicService(metadataService, service.getPulsar());
+        amqpBrokerService = new AmqpBrokerService(service.getPulsar(), amqpConfig, topicService);
         if (amqpConfig.isAmqpProxyEnable()) {
             ProxyConfiguration proxyConfig = new ProxyConfiguration();
             proxyConfig.setAmqpAllowedMechanisms(amqpConfig.getAmqpAllowedMechanisms());
