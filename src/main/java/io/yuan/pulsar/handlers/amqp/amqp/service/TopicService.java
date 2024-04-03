@@ -2,9 +2,13 @@ package io.yuan.pulsar.handlers.amqp.amqp.service;
 
 import com.google.common.base.Splitter;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.bookkeeper.clients.exceptions.NamespaceNotFoundException;
 import org.apache.pulsar.broker.PulsarService;
 import org.apache.pulsar.broker.namespace.LookupOptions;
+import org.apache.pulsar.broker.namespace.NamespaceBundleOwnershipListener;
 import org.apache.pulsar.broker.service.Topic;
+import org.apache.pulsar.common.naming.NamespaceBundle;
 import org.apache.pulsar.common.naming.TopicDomain;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.policies.data.AutoTopicCreationOverride;
@@ -18,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 提供Topic相关服务，包括元数据更新，元数据获取，根据Name返回Topic等功能
  * */
+@Slf4j
 public class TopicService {
 
     public static final String PERSISTENT_DOMAIN = TopicDomain.persistent.value() + "://";
@@ -35,12 +40,12 @@ public class TopicService {
     public CompletableFuture<Optional<Topic>> getTopicReference(String topicName,
                                                                        String tenantName, String namespaceName,
                                                                        boolean encodeTopicName,
-                                                                       String defaultTopicDomain) {
-        return getTopicName(topicName, tenantName, namespaceName, encodeTopicName, defaultTopicDomain)
+                                                                       boolean isPersistent) {
+        return generateTopicName(topicName, tenantName, namespaceName, encodeTopicName, isPersistent)
             .thenCompose(topic -> pulsarService.getPulsarResources().getNamespaceResources()
                 .getPoliciesAsync(topic.getNamespaceObject())
                 .thenApply(policies -> {
-                    if (!policies.isPresent()) {
+                    if (policies.isEmpty()) {
                         return pulsarService.getConfig().isAllowAutoTopicCreation();
                     }
                     AutoTopicCreationOverride autoTopicCreationOverride =
@@ -66,9 +71,16 @@ public class TopicService {
 
     public CompletableFuture<Optional<Topic>> getTopicReference(TopicName topic,
                                                                        Boolean createIfMissing) {
-        return pulsarService.getNamespaceService().getBrokerServiceUrlAsync(topic,
-                LookupOptions.builder().authoritative(false).loadTopicsInBundle(false).build())
-            .thenCompose(lookupOp -> pulsarService.getBrokerService().getTopic(topic.toString(), createIfMissing));
+        return pulsarService.getPulsarResources().getNamespaceResources().getPoliciesAsync(topic.getNamespaceObject())
+            .thenCompose(policies -> {
+                if (policies.isEmpty()) {
+                    log.error("Get or create topic failed, namespace not found:{}", topic.getNamespace());
+                    return FutureUtil.failedFuture(new NamespaceNotFoundException(topic.getNamespace()));
+                }
+                return pulsarService.getNamespaceService().getBrokerServiceUrlAsync(topic,
+                        LookupOptions.builder().authoritative(false).loadTopicsInBundle(false).build())
+                    .thenCompose(lookupOp -> pulsarService.getBrokerService().getTopic(topic.toString(), createIfMissing));
+            });
     }
 
     public static CompletableFuture<TopicName> getTopicName(String topicName, String tenantName,
@@ -80,6 +92,20 @@ public class TopicService {
                     getPulsarTopicName(topicName, tenantName, namespaceName, encodeTopicName,
                         TopicDomain.getEnum(defaultTopicDomain))));
         } catch (Exception e) {
+            return FutureUtil.failedFuture(e);
+        }
+    }
+
+    public static CompletableFuture<TopicName> generateTopicName(String shortName, String tenantName,
+                                                                 String namespaceName, boolean encode,
+                                                                 boolean isPersistent) {
+        try {
+            return CompletableFuture.completedFuture(
+                TopicName.get(isPersistent ? PERSISTENT_DOMAIN : NON_PERSISTENT_DOMAIN,
+                    tenantName, namespaceName, shortName)
+            );
+        } catch (Exception e) {
+            log.error("Wrong format of topic", e);
             return FutureUtil.failedFuture(e);
         }
     }

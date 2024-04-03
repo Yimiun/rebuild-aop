@@ -54,8 +54,6 @@ public class AmqpProtocolHandler implements ProtocolHandler {
     private Server webServer;
     @Getter
     private EventManager eventManager;
-    private TopicService topicService;
-    private MetadataService metadataService;
 
     @Override
     public String protocolName() {
@@ -94,9 +92,7 @@ public class AmqpProtocolHandler implements ProtocolHandler {
         brokerService = service;
         eventManager = new EventManager(brokerService.getPulsar().getLocalMetadataStore(), amqpConfig);
         eventManager.start();
-        metadataService = new MetadataServiceImpl(service.pulsar().getLocalMetadataStore());
-        topicService = new TopicService(metadataService, service.getPulsar());
-        amqpBrokerService = new AmqpBrokerService(service.getPulsar(), amqpConfig, topicService);
+        amqpBrokerService = new AmqpBrokerService(service.getPulsar(), amqpConfig);
         if (amqpConfig.isAmqpProxyEnable()) {
             ProxyConfiguration proxyConfig = new ProxyConfiguration();
             proxyConfig.setAmqpAllowedMechanisms(amqpConfig.getAmqpAllowedMechanisms());

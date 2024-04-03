@@ -10,7 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
-public abstract class AbstractExchange extends AbstractTopic implements Exchange {
+public abstract class AbstractExchange implements Exchange {
 
     protected final String exchangeName;
     protected final Exchange.Type exchangeType;
@@ -19,7 +19,7 @@ public abstract class AbstractExchange extends AbstractTopic implements Exchange
     protected final boolean internal;
     protected Map<String, Object> arguments;
     protected volatile State exchangeState = State.Closed;
-    protected final Map<String, List<Topic>> routerMap = new ConcurrentHashMap<>();
+    protected final Map<String, List<String>> routerMap = new ConcurrentHashMap<>();
     protected static final AtomicReferenceFieldUpdater<AbstractExchange, State> stateReference =
         AtomicReferenceFieldUpdater.newUpdater(AbstractExchange.class, State.class, "exchangeState");
 
@@ -27,8 +27,7 @@ public abstract class AbstractExchange extends AbstractTopic implements Exchange
 
     AbstractExchange(String exchangeName, Type type, boolean durable,
                      boolean autoDelete, boolean internal, BindData bindData,
-                     Map<String, Object> arguments, Topic topic) {
-        super(topic);
+                     Map<String, Object> arguments) {
         start();
         this.exchangeName = exchangeName;
         this.exchangeType = type;

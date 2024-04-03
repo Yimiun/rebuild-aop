@@ -34,22 +34,37 @@ public class MetadataServiceImpl implements MetadataService{
     }
 
     @Override
-    public <T> CompletableFuture<Void> updateTopicMetadata(Class<T> clazz, T metadata, String path) {
-        return createOrGetMetadataCache(clazz).create(path, metadata);
+    public <T> CompletableFuture<Void> updateTopicMetadata(Class<T> clazz, T metadata, String path, boolean refresh) {
+        MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
+        CompletableFuture<Void> completableFuture = metadataCache.create(path, metadata);
+        if (refresh) {
+            metadataCache.refresh(path);
+        }
+        return completableFuture;
     }
 
     @Override
-    public void registerListener(Consumer<Notification> listener) {
-        listeners.add(listener);
-    }
-
-    @Override
-    public <T> CompletableFuture<Optional<T>> getTopicMetadata(Class<T> clazz, String path) {
-        return createOrGetMetadataCache(clazz).get(path);
+    public <T> CompletableFuture<Optional<T>> getTopicMetadata(Class<T> clazz, String path, boolean refresh) {
+        MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
+        if (refresh) {
+            metadataCache.refresh(path);
+        }
+        return metadataCache.get(path);
     }
 
     @Override
     public <T> MetadataCache<T> createOrGetMetadataCache(Class<T> clazz) {
         return classMetadataCache.computeIfAbsent(clazz, key -> metadataStore.getMetadataCache(clazz));
+    }
+
+    @Override
+    public <T> void invalidPath(Class<T> clazz, String path) {
+        createOrGetMetadataCache(clazz).invalidate(path);
+    }
+
+
+    @Override
+    public void registerListener(Consumer<Notification> listener) {
+        listeners.add(listener);
     }
 }

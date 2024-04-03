@@ -47,8 +47,6 @@ public interface Exchange {
 
     Exchange.Type getType();
 
-    Topic getTopic();
-
     CompletableFuture<Position> writeToTopic(ByteBuf buf);
 
     CompletableFuture<Void> close();

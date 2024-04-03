@@ -14,16 +14,11 @@ import java.util.concurrent.CompletableFuture;
  * */
 public class PersistentExchange extends AbstractExchange {
 
-    public PersistentExchange(PersistentTopic topic, String exchangeName, Type type, boolean durable,
+    public PersistentExchange(String exchangeName, Type type, boolean durable,
                               boolean autoDelete, boolean internal, BindData bindData,
                               Map<String, Object> arguments) {
-        super(exchangeName, type, durable, autoDelete, internal, bindData, arguments, topic);
+        super(exchangeName, type, durable, autoDelete, internal, bindData, arguments);
 
-    }
-
-    @Override
-    public Topic getTopic() {
-        return null;
     }
 
     @Override

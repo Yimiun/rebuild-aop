@@ -28,6 +28,8 @@ import java.util.concurrent.LinkedBlockingQueue;
  * CacheSize应当根据现在的所有queue流量情况动态更改，对于大流量queue, 提升thresholdSize大小
  *
  * 若出现主队列在存盘时，备用队列被写满（写不满，只能内存溢出，这里指额定上限*1.2 (?存疑)），则放弃所有策略，全部采用立即落盘。
+ *
+ * 只有目前有消费者
  * */
 public class RoutingQueue {
 
