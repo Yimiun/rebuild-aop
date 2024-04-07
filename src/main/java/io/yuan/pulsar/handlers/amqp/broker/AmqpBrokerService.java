@@ -32,7 +32,7 @@ public class AmqpBrokerService {
         this.amqpServiceConfiguration = amqpConfig;
         this.metadataService = new MetadataServiceImpl(pulsarService.getLocalMetadataStore());
         this.topicService = new TopicService(metadataService, pulsarService);
-        this.exchangeService = new ExchangeServiceImpl(topicService, metadataService, amqpServiceConfiguration);
+        this.exchangeService = new ExchangeServiceImpl(metadataService, amqpServiceConfiguration);
         this.bundleListener = new BundleListener(pulsarService.getNamespaceService());
         bundleListener.addTopicOwnershipListener(new TopicOwnershipListener() {
             @Override

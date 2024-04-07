@@ -52,4 +52,8 @@ public interface Exchange {
     CompletableFuture<Void> close();
 
     CompletableFuture<Void> start();
+
+    boolean isClosed();
+
+    boolean isStart();
 }

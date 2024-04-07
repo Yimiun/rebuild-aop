@@ -58,6 +58,11 @@ public class MetadataServiceImpl implements MetadataService{
     }
 
     @Override
+    public <T> CompletableFuture<Void> deleteMetadata(Class<T> clazz, String path) {
+        return createOrGetMetadataCache(clazz).delete(path);
+    }
+
+    @Override
     public <T> void invalidPath(Class<T> clazz, String path) {
         createOrGetMetadataCache(clazz).invalidate(path);
     }

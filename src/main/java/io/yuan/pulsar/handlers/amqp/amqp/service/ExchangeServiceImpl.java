@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.bookkeeper.common.util.ExceptionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pulsar.metadata.api.MetadataStoreException;
+import org.apache.pulsar.metadata.api.Notification;
+import org.apache.pulsar.metadata.api.NotificationType;
 
 import java.util.Map;
 import java.util.Optional;
@@ -22,9 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class ExchangeServiceImpl implements ExchangeService {
 
-    private static final String prefix = "amqp/exchange";
-
-    private final TopicService topicService;
+    private static final String prefix = "/amqp/exchange";
 
     private final MetadataService metadataService;
 
@@ -34,51 +34,52 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final Set<String> nonPersistentSet = new ConcurrentHashSet<>();
 
-    public ExchangeServiceImpl(TopicService exchangeService, MetadataService metadataService,
+    private final Object lock = new Object();
+
+    public :ExchangeServiceImpl(MetadataService metadataService,
                                AmqpServiceConfiguration amqpServiceConfiguration) {
-        this.topicService = exchangeService;
         this.metadataService = metadataService;
         this.amqpServiceConfiguration = amqpServiceConfiguration;
+        metadataService.registerListener(this::handleNotification);
     }
 
+
     @Override
-    // name是不含任何前缀的topic名 xxxx
+    public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName, String namespaceName) {
+        return getExchange(name, tenantName, namespaceName, false);
+    }
+
     public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName,
                                                              String namespaceName, boolean refresh) {
 
         String path = generatePath(tenantName, namespaceName, name);
         if (exchangeMap.containsKey(path)) {
-            // 防止并发情况下出现移除，从而get到null还需要额外判断。
-            CompletableFuture<Optional<Exchange>> exchangeFuture = exchangeMap.get(name);
-            return exchangeFuture == null ? CompletableFuture.completedFuture(Optional.empty()) : exchangeFuture;
+            return exchangeMap.get(name);
         }
-
-        return metadataService.getTopicMetadata(ExchangeData.class, path, refresh)
-                .thenCompose(metadataOps -> {
-                    if (metadataOps.isEmpty()) {
-                        log.error("Exchange:{} metadata is empty! autoDelete and closed connection", name);
-                        removeExchange(name, tenantName, namespaceName)
-                            .whenComplete((__, ex) -> {
-                                log.warn("Caused by exchange metadata empty, exchange:{} autoDelete done", name);
-                            });
-                        return CompletableFuture.completedFuture(Optional.empty());
-                    }
-                    CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
-                    Exchange exchange = recoveryExchange(name, metadataOps.get());
-                    completableFuture.complete(Optional.of(exchange));
-                    exchangeMap.put(path, completableFuture);
-                    return completableFuture;
-                });
+        synchronized (lock) {
+            return metadataService.getTopicMetadata(ExchangeData.class, path, refresh)
+                    .thenCompose(metadataOps -> {
+                        if (metadataOps.isEmpty()) {
+                            log.error("Exchange:{} metadata is empty! create it first", name);
+                            return CompletableFuture.completedFuture(Optional.empty());
+                        }
+                        CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
+                        Exchange exchange = recoveryExchange(name, metadataOps.get());
+                        completableFuture.complete(Optional.of(exchange));
+                        exchangeMap.put(path, completableFuture);
+                        return completableFuture;
+                    });
         }
+    }
 
     @Override
     // 如果passive为true，外层应当调用getExchange方法，根据返回值返回信息。
-    // 由于是用的cache的方法，忽略掉了zk返回的版本信息，需要在
+    // 并不更新缓存
     public CompletableFuture<Optional<Exchange>> createExchange(String name, String tenantName, String namespaceName,
                                                                 String type, boolean passive, boolean durable,
                                                                 boolean autoDelete, boolean internal,
                                                                 Map<String, Object> arguments) {
-        return getExchange(name, tenantName, namespaceName, false)
+        return getExchange(name, tenantName, namespaceName)
             .thenCompose(exchangeOps -> {
                 if (exchangeOps.isEmpty()) {
                     if (StringUtils.isBlank(name) || StringUtils.isBlank(tenantName) || StringUtils.isBlank(namespaceName)) {
@@ -118,12 +119,6 @@ public class ExchangeServiceImpl implements ExchangeService {
             });
     }
 
-    @Override
-    public CompletableFuture<Void> removeExchange(String name, String tenantName, String namespaceName) {
-        removeCache(name);
-        return null;
-    }
-
     private Exchange recoveryExchange(String name, ExchangeData exchangeData) {
 
         String typeName = exchangeData.getType();
@@ -154,24 +149,48 @@ public class ExchangeServiceImpl implements ExchangeService {
         return exchangeData;
     }
 
-    // no need lock
-    public /*synchronized*/ void removeCache(String name) {
-        exchangeMap.remove(name).thenAccept(ops -> {
-            ops.ifPresent(Exchange::close);
-        });
+    @Override
+    public void removeExchange(String name, String tenantName, String namespaceName) {
+        String path = generatePath(tenantName, namespaceName, name);
+        removeExchange(path);
+    }
+
+    // 同步，防止出现remove时get的操作，从而出现未close的Exchange
+    private void removeExchange(String pathName) {
+        synchronized (lock) {
+            metadataService.deleteMetadata(ExchangeData.class, pathName)
+                .whenComplete((__, ex) -> {
+                    if (ex != null) {
+                        log.error("Remove exchange metadata wrong", ex);
+                    }
+                    removeCache(pathName).whenComplete((ops, e) -> {
+                        ops.ifPresent(Exchange::close);
+                    });
+                });
+        }
+        log.info("Successfully removed exchange:{}", pathName);
+    }
+
+    // no need to lock
+    public /*synchronized*/ CompletableFuture<Optional<Exchange>> removeCache(String name) {
+        if (log.isDebugEnabled()) {
+            log.debug("Exchange:{} has been removed from cache", name);
+        }
+        return exchangeMap.remove(name);
     }
 
     private String generatePath(String tenant, String namespace, String shortName) {
         return prefix + "/" + tenant + "/" + namespace + "/" + shortName;
     }
 
-//    private boolean checkEquals(Exchange exchange, ExchangeData exchangeData) {
-//        return exchange.getAutoDelete() == exchangeData.isAutoDelete()
-//            && exchange.getDurable() == exchangeData.isDurable()
-//            && exchange.getArguments().equals(exchange.getArguments())
-//            && exchange.getName().equals(exchangeData.getName())
-//            && exchange.getType().name().equals(exchangeData.getType())
-//            && exchange.
-//    }
+    private void handleNotification(Notification notification) {
+        if (notification.getType().equals(NotificationType.Deleted)) {
+            String path = notification.getPath().substring(prefix.length());
+            removeExchange(path);
+            log.warn("A Delete request is processed on another broker, so delete the exchange {} on this broker", path);
+        } else if (notification.getType().equals(NotificationType.Modified)) {
+            // change the routing key
+        }
+    }
 
 }

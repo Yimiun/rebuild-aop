@@ -89,4 +89,14 @@ public abstract class AbstractExchange implements Exchange {
         }
         return completableFuture;
     }
+
+    @Override
+    public boolean isClosed() {
+        return exchangeState.equals(State.Closed);
+    }
+
+    @Override
+    public boolean isStart() {
+        return exchangeState.equals(State.On);
+    }
 }
