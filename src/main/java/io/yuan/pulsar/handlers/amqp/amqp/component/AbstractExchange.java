@@ -26,7 +26,7 @@ public abstract class AbstractExchange implements Exchange {
 //    protected final List<>
 
     AbstractExchange(String exchangeName, Type type, boolean durable,
-                     boolean autoDelete, boolean internal, BindData bindData,
+                     boolean autoDelete, boolean internal, List<BindData> bindData,
                      Map<String, Object> arguments) {
         start();
         this.exchangeName = exchangeName;

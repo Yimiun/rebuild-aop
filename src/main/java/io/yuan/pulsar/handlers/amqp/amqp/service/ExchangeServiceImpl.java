@@ -15,16 +15,14 @@ import org.apache.pulsar.metadata.api.MetadataStoreException;
 import org.apache.pulsar.metadata.api.Notification;
 import org.apache.pulsar.metadata.api.NotificationType;
 
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 public class ExchangeServiceImpl implements ExchangeService {
 
-    private static final String prefix = "/amqp/exchange";
+    private static final String prefix = "/amqp/exchange/";
 
     private final MetadataService metadataService;
 
@@ -49,6 +47,10 @@ public class ExchangeServiceImpl implements ExchangeService {
         return getExchange(name, tenantName, namespaceName, false);
     }
 
+    /**
+     * refresh = true:   equals  store.get()
+     * refresh = false:  equals  cache.get()
+     * */
     public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName,
                                                              String namespaceName, boolean refresh) {
 
@@ -124,7 +126,7 @@ public class ExchangeServiceImpl implements ExchangeService {
         String typeName = exchangeData.getType();
         boolean autoDelete = exchangeData.isAutoDelete();
         boolean internal = exchangeData.isInternal();
-        BindData bindData = exchangeData.getBindData();
+        List<BindData> bindData = exchangeData.getBindsData();
         Map<String, Object> args = exchangeData.getArguments();
         Exchange.Type type = Exchange.Type.value(typeName);
 
@@ -137,7 +139,7 @@ public class ExchangeServiceImpl implements ExchangeService {
         exchangeData.setName(name);
         exchangeData.setVhost(vhost);
         exchangeData.setDurable(durable);
-        exchangeData.setBindData(new BindData());
+        exchangeData.setBindsData(new ArrayList<>());
         if (StringUtils.isEmpty(type)) {
             exchangeData.setType(Exchange.Type.Direct.name());
         } else {
@@ -180,17 +182,26 @@ public class ExchangeServiceImpl implements ExchangeService {
     }
 
     private String generatePath(String tenant, String namespace, String shortName) {
-        return prefix + "/" + tenant + "/" + namespace + "/" + shortName;
+        return prefix + tenant + "/" + namespace + "/" + shortName;
     }
 
     private void handleNotification(Notification notification) {
         if (notification.getType().equals(NotificationType.Deleted)) {
-            String path = notification.getPath().substring(prefix.length());
-            removeExchange(path);
-            log.warn("A Delete request is processed on another broker, so delete the exchange {} on this broker", path);
+            String pathName = notification.getPath().substring(prefix.length());
+            removeExchange(pathName);
+            log.warn("A Delete request is processed on another broker, so delete the exchange {} on this broker", pathName);
         } else if (notification.getType().equals(NotificationType.Modified)) {
             // change the routing key
+            String pathName = notification.getPath().substring(prefix.length());
+            metadataService.getTopicMetadata(ExchangeData.class, notification.getPath(), true)
+                .thenAccept(ops -> {
+                    ops.ifPresent(exchangeData -> refreshRouting(pathName, exchangeData.getBindsData()));
+                });
         }
+    }
+
+    private void refreshRouting(String name, List<BindData> bindsData) {
+
     }
 
 }

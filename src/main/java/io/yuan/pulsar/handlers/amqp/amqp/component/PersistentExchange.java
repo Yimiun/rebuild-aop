@@ -6,6 +6,7 @@ import org.apache.bookkeeper.mledger.Position;
 import org.apache.pulsar.broker.service.Topic;
 import org.apache.pulsar.broker.service.persistent.PersistentTopic;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -15,7 +16,7 @@ import java.util.concurrent.CompletableFuture;
 public class PersistentExchange extends AbstractExchange {
 
     public PersistentExchange(String exchangeName, Type type, boolean durable,
-                              boolean autoDelete, boolean internal, BindData bindData,
+                              boolean autoDelete, boolean internal, List<BindData> bindData,
                               Map<String, Object> arguments) {
         super(exchangeName, type, durable, autoDelete, internal, bindData, arguments);
 

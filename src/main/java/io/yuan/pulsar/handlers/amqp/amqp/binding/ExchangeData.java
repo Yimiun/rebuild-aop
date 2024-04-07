@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
 import java.util.Map;
 
 @JsonDeserialize(as = ExchangeData.class)
@@ -28,7 +29,7 @@ public class ExchangeData {
     @JsonProperty
     private boolean autoDelete;
     @JsonProperty
-    private BindData bindData;
+    private List<BindData> bindsData;
     @JsonProperty
     private Map<String, Object> arguments;
 }

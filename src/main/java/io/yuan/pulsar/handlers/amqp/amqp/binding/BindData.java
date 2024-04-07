@@ -16,16 +16,16 @@ import java.util.Set;
 @AllArgsConstructor
 @NoArgsConstructor
 public class BindData {
-    @JsonProperty
-    private String vhost;
+
     @JsonProperty
     private String fromName;
+
     @JsonProperty
     private String toName;
+
     @JsonProperty
-    private Set<String> routingKeys;
-    @JsonProperty
-    private String propertiesKey;
+    private String routingKey;
+
     @JsonProperty
     private Map<String, Object> arguments;
 }
