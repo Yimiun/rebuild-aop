@@ -36,7 +36,7 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final Object lock = new Object();
 
-    public :ExchangeServiceImpl(MetadataService metadataService,
+    public ExchangeServiceImpl(MetadataService metadataService,
                                AmqpServiceConfiguration amqpServiceConfiguration) {
         this.metadataService = metadataService;
         this.amqpServiceConfiguration = amqpServiceConfiguration;
