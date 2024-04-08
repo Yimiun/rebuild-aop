@@ -1,13 +1,11 @@
 package io.yuan.pulsar.handlers.amqp.amqp.component;
 
-import io.netty.buffer.ByteBuf;
-import org.apache.bookkeeper.mledger.Position;
-import org.apache.pulsar.broker.service.Topic;
-
+import io.yuan.pulsar.handlers.amqp.amqp.binding.BindData;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public interface Exchange {
+public interface Exchange extends Router {
 
     enum Type{
         Direct,
@@ -35,6 +33,8 @@ public interface Exchange {
         }
     }
 
+    List<BindData> getBindData();
+
     String getName();
 
     boolean getDurable();
@@ -47,11 +47,9 @@ public interface Exchange {
 
     Exchange.Type getType();
 
-    CompletableFuture<Position> writeToTopic(ByteBuf buf);
-
     CompletableFuture<Void> close();
 
-    CompletableFuture<Void> start();
+    void start();
 
     boolean isClosed();
 

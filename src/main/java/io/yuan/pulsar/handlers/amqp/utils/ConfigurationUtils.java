@@ -34,6 +34,13 @@ import static org.apache.pulsar.common.util.FieldParser.value;
  */
 public final class ConfigurationUtils {
 
+    public static final String PROTOCOL_NAME = "amqp";
+    public static final String PLAINTEXT_PREFIX = "amqp://";
+    public static final String SSL_PREFIX = "amqp+ssl://";
+    public static final String SSL_PSK_PREFIX = "amqp+ssl+psk://";
+    public static final String LISTENER_DEL = ",";
+    public static final String COLON = ":";
+
     /**
      * Creates PulsarConfiguration and loads it with populated attribute values loaded from provided property file.
      *

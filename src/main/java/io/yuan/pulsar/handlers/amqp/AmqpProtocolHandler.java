@@ -1,18 +1,16 @@
-package io.yuan.pulsar.handlers.amqp.netty;
+package io.yuan.pulsar.handlers.amqp;
 
 import com.google.common.collect.ImmutableMap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
-import io.yuan.pulsar.handlers.amqp.amqp.service.TopicService;
 import io.yuan.pulsar.handlers.amqp.broker.AmqpBrokerService;
 import io.yuan.pulsar.handlers.amqp.broker.EventManager;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
 import io.yuan.pulsar.handlers.amqp.configuration.ProxyConfiguration;
-import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
-import io.yuan.pulsar.handlers.amqp.metadata.MetadataServiceImpl;
 import io.yuan.pulsar.handlers.amqp.proxy.ProxyService;
+import io.yuan.pulsar.handlers.amqp.proxy.lookup.AmqpLookupHandler;
+import io.yuan.pulsar.handlers.amqp.proxy.lookup.AmqpLookupHandlerImpl;
 import io.yuan.pulsar.handlers.amqp.utils.ConfigurationUtils;
-import io.yuan.pulsar.handlers.amqp.utils.ipUtils.IpFilter;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.configuration.Configuration;
@@ -21,7 +19,6 @@ import org.apache.pulsar.broker.ServiceConfiguration;
 import org.apache.pulsar.broker.ServiceConfigurationUtils;
 import org.apache.pulsar.broker.protocol.ProtocolHandler;
 import org.apache.pulsar.broker.service.BrokerService;
-import org.apache.pulsar.metadata.api.MetadataStore;
 import org.apache.pulsar.policies.data.loadbalancer.AdvertisedListener;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
@@ -76,7 +73,6 @@ public class AmqpProtocolHandler implements ProtocolHandler {
             amqpConfig = ConfigurationUtils.create(conf.getProperties(), AmqpServiceConfiguration.class);
         }
         this.bindAddress = ServiceConfigurationUtils.getDefaultOrConfiguredAddress(amqpConfig.getBindAddress());
-        IpFilter.addDefaultIp(conf.getManagerUrl().trim().split("://")[1].split(":")[0]);
     }
 
     @Override
@@ -153,7 +149,7 @@ public class AmqpProtocolHandler implements ProtocolHandler {
         jerseyServlet.setInitOrder(0);
 
         jerseyServlet.setInitParameter(
-            "jersey.config.server.provider.packages", "io.streamnative.pulsar.handlers.amqp.admin");
+            "jersey.config.server.provider.packages", "io.yuan.pulsar.handlers.amqp.admin");
 
         try {
             webServer.start();

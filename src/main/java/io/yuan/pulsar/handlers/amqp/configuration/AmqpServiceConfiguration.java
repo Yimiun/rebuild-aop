@@ -260,5 +260,9 @@ public class AmqpServiceConfiguration extends ServiceConfiguration {
         doc = "AMQP Replication Password"
     )
     private Integer amqpReplicationOffsetPeriod = 120;
+
+    private int lookupOperationTimeoutMs = 20000;
+
+    private int MaxLookupIntervalMs = 5000;
 }
 

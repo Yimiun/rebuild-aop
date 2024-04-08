@@ -1,15 +1,24 @@
 package io.yuan.pulsar.handlers.amqp.amqp.component;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
+import io.vertx.core.impl.ConcurrentHashSet;
 import io.yuan.pulsar.handlers.amqp.amqp.binding.BindData;
-import org.apache.pulsar.broker.service.Topic;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.bookkeeper.mledger.Position;
+import org.apache.pulsar.common.naming.TopicName;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+@Slf4j
 public abstract class AbstractExchange implements Exchange {
 
     protected final String exchangeName;
@@ -19,11 +28,10 @@ public abstract class AbstractExchange implements Exchange {
     protected final boolean internal;
     protected Map<String, Object> arguments;
     protected volatile State exchangeState = State.Closed;
-    protected final Map<String, List<String>> routerMap = new ConcurrentHashMap<>();
+    protected final List<BindData> bindData = new CopyOnWriteArrayList<>();
+    protected final Map<String, Set<BindData>> routerMap = new ConcurrentHashMap<>();
     protected static final AtomicReferenceFieldUpdater<AbstractExchange, State> stateReference =
         AtomicReferenceFieldUpdater.newUpdater(AbstractExchange.class, State.class, "exchangeState");
-
-//    protected final List<>
 
     AbstractExchange(String exchangeName, Type type, boolean durable,
                      boolean autoDelete, boolean internal, List<BindData> bindData,
@@ -35,6 +43,27 @@ public abstract class AbstractExchange implements Exchange {
         this.autoDelete = autoDelete;
         this.internal = internal;
         this.arguments = arguments;
+        this.bindData.addAll(bindData);
+        generateBindData(bindData);
+    }
+
+    @Override
+    public CompletableFuture<Void> route(TopicName from, ByteBuf buf, String routingKey) {
+        CompletableFuture<Void> completableFuture = new CompletableFuture<>();
+        if (exchangeState.equals(State.Closed)) {
+            log.warn("Route stopped, because the exchange:{} is deleted", exchangeName);
+            completableFuture.completeExceptionally(new IOException());
+        }
+        if (!exchangeName.equals(from.getLocalName())) {
+            completableFuture.completeExceptionally(new IOException());
+        }
+        return completableFuture;
+    }
+
+    private synchronized void generateBindData(List<BindData> bindData) {
+        bindData.forEach(bd -> {
+            routerMap.computeIfAbsent(bd.getRoutingKey(), key -> new HashSet<>()).add(bd);
+        });
     }
 
     @Override
@@ -58,6 +87,11 @@ public abstract class AbstractExchange implements Exchange {
     }
 
     @Override
+    public List<BindData> getBindData() {
+        return this.bindData;
+    }
+
+    @Override
     public Map<String, Object> getArguments() {
         return this.arguments;
     }
@@ -72,6 +106,7 @@ public abstract class AbstractExchange implements Exchange {
         CompletableFuture<Void> completableFuture = new CompletableFuture<>();
         if (stateReference.compareAndSet(this, State.On, State.Closed)) {
             routerMap.clear();
+            arguments.clear();
             completableFuture.complete(null);
         } else {
             completableFuture.completeExceptionally(new IOException("Already close"));
@@ -80,14 +115,10 @@ public abstract class AbstractExchange implements Exchange {
     }
 
     @Override
-    public CompletableFuture<Void> start() {
-        CompletableFuture<Void> completableFuture = new CompletableFuture<>();
+    public void start() {
         if (stateReference.compareAndSet(this, State.Closed, State.On)) {
-            completableFuture.complete(null);
-        } else {
-            completableFuture.completeExceptionally(new IOException("Already start"));
+            log.info("Exchange:{} has been initialized", this.getName());
         }
-        return completableFuture;
     }
 
     @Override

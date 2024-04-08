@@ -19,7 +19,6 @@ public class BundleListener implements NamespaceBundleOwnershipListener {
 
     private final NamespaceService namespaceService;
 
-
     private final List<TopicOwnershipListener> topicOwnershipListeners = new CopyOnWriteArrayList<>();
 
     public BundleListener(NamespaceService namespaceService) {
