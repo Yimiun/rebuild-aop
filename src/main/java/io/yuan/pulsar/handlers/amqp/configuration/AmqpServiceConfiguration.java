@@ -263,6 +263,8 @@ public class AmqpServiceConfiguration extends ServiceConfiguration {
 
     private int lookupOperationTimeoutMs = 20000;
 
-    private int MaxLookupIntervalMs = 5000;
+    private int maxLookupIntervalMs = 5000;
+
+    private int clientNumber = 2 * 3;
 }
 

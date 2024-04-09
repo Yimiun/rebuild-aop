@@ -40,7 +40,7 @@
         <project.compiler.release>${maven.compiler.target}</project.compiler.release>
 
         <!-- dependencies -->
-        <pulsar.version>2.10.3-apusic</pulsar.version>
+        <pulsar.version>3.2.1</pulsar.version>
         <qpid-protocol-plugin.version>8.0.6</qpid-protocol-plugin.version>
         <rabbitmq.version>5.17.0</rabbitmq.version>
         <bcel.version>6.7.0</bcel.version>

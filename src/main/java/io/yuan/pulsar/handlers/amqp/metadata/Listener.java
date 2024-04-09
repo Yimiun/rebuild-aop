@@ -1,4 +1,4 @@
-package io.yuan.pulsar.handlers.amqp.listener;
+package io.yuan.pulsar.handlers.amqp.metadata;
 
 import java.util.concurrent.CompletableFuture;
 

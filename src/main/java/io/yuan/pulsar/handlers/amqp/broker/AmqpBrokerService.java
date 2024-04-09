@@ -49,7 +49,7 @@ public class AmqpBrokerService {
                 } else {
 
                 }
-                topicService.addTopicsCache(topicName);
+//                topicService.addTopicsCache(topicName);
             }
 
             @Override
@@ -60,7 +60,7 @@ public class AmqpBrokerService {
                 } else {
 
                 }
-                topicService.removeTopicsCache(topicName);
+//                topicService.removeTopicsCache(topicName);
             }
 
             @Override
@@ -68,5 +68,9 @@ public class AmqpBrokerService {
                 return "handle non-persistent query";
             }
         });
+
+        if (amqpConfig.isAmqpProxyEnable()) {
+//            metadataService.registerListener();
+        }
     }
 }

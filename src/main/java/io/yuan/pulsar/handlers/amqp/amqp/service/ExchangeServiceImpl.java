@@ -14,11 +14,9 @@ import org.apache.pulsar.metadata.api.MetadataStoreException;
 import org.apache.pulsar.metadata.api.Notification;
 import org.apache.pulsar.metadata.api.NotificationType;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Slf4j
 public class ExchangeServiceImpl implements ExchangeService {
@@ -33,7 +31,7 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final Set<String> nonPersistentSet = new ConcurrentHashSet<>();
 
-    private final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+    private final Object lock = new Object();
 
     public ExchangeServiceImpl(MetadataService metadataService,
                                AmqpServiceConfiguration amqpServiceConfiguration) {
@@ -53,6 +51,9 @@ public class ExchangeServiceImpl implements ExchangeService {
      * refresh = false:  equals  cache.get()
      * ensure exchange singleton
      * ensure multi threads safety
+     *
+     *    return val :
+     *    if (empty) closeConnection
      * @Todo authorization
      * */
     public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName,
@@ -64,32 +65,37 @@ public class ExchangeServiceImpl implements ExchangeService {
             return res == null ? CompletableFuture.completedFuture(Optional.empty()) : res;
         }
         // to avoid delete-get multi threads operation going wrong, which causes exchange stats wrong
-        readWriteLock.readLock().lock();
-        try{
+        synchronized (lock) {
             // singleton, one exchange only has one instance
             if (exchangeMap.containsKey(path)) {
                 return exchangeMap.get(path);
             }
-            return metadataService.getTopicMetadata(ExchangeData.class, path, refresh)
+            return metadataService.getMetadata(ExchangeData.class, path, refresh)
                 .thenCompose(metadataOps -> {
                     if (metadataOps.isEmpty()) {
                         log.error("Exchange:{} metadata is empty! create it first", name);
                         return CompletableFuture.completedFuture(Optional.empty());
                     }
                     CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
-                    Exchange exchange = recoveryExchange(name, metadataOps.get());
+                    Exchange exchange = recoveryExchange(metadataOps.get());
                     completableFuture.complete(Optional.of(exchange));
                     exchangeMap.put(path, completableFuture);
                     return completableFuture;
                 });
-        } finally {
-            readWriteLock.readLock().unlock();
         }
     }
 
+    /**
+     * All exchangeMap-cached operations are performed through the GET-method, and for this non-high-frequency operation
+     * some performance can be sacrificed for strong consistency and singleton performance
+     * The reason for not using Request-then-Handle way is to quickly generate new instances
+     *
+     *      return val :
+     *      if (empty) closeConnection
+     * */
+
     @Override
-    // All cache generation operations are performed through the get method, and for this non-high-frequency operation,
-    // some performance can be sacrificed for high security and singleton performance
+    // @Todo need to handle createIfMissing
     public CompletableFuture<Optional<Exchange>> createExchange(String name, String tenantName, String namespaceName,
                                                                 String type, boolean passive, boolean durable,
                                                                 boolean autoDelete, boolean internal,
@@ -104,11 +110,10 @@ public class ExchangeServiceImpl implements ExchangeService {
                     ExchangeData data = generateExchangeData(name, namespaceName, type, autoDelete, durable, arguments);
                     String path = generatePath(tenantName, namespaceName, name);
                     final CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
-                    metadataService.updateTopicMetadata(ExchangeData.class, data, path, false)
+                    metadataService.updateMetadata(ExchangeData.class, data, path, false)
                         .whenComplete((__, ex) -> {
                             if (ex == null || FutureExceptionUtils.DecodeFuture(ex) instanceof
                                     MetadataStoreException.AlreadyExistsException) {
-
                                 if (ex != null) {
                                     log.warn("Create Exchange:{} with data:{} failed, Another creation request" +
                                         " accepted by another node has already been created", name, data);
@@ -132,10 +137,11 @@ public class ExchangeServiceImpl implements ExchangeService {
             });
     }
 
-    @Override
     /**
-     *
+     *  Call this method and update an exchange's routerMap in metadata
      * */
+
+    @Override
     public CompletableFuture<Void> updateRouter(String exchangeName, String tenantName, String namespaceName,
                                                     String queueName, String bindingKey) {
 
@@ -154,60 +160,69 @@ public class ExchangeServiceImpl implements ExchangeService {
         return completableFuture;
     }
 
+    /**
+     *  Call this method and delete an exchange's metadata
+     * */
+
     @Override
-    // delete method
     public void removeExchange(String name, String tenantName, String namespaceName) {
         String path = generatePath(tenantName, namespaceName, name);
-        readWriteLock.writeLock().lock();
-        try {
+        synchronized (lock) {
             metadataService.deleteMetadata(ExchangeData.class, path)
                 .whenComplete((__, ex) -> {
                     if (ex != null) {
                         log.error("Remove exchange metadata wrong", ex);
-                        // maybe do something???????
                     }
                 });
-        } finally {
-            readWriteLock.writeLock().unlock();
         }
         log.info("Successfully delete exchange:{}", path);
     }
 
     private void handleNotification(Notification notification) {
+        if (!notification.getPath().startsWith(prefix)) {
+            return;
+        }
+        String pathName = notification.getPath().substring(prefix.length());
+        if (!exchangeMap.containsKey(pathName)) {
+            return;
+        }
         if (notification.getType().equals(NotificationType.Deleted)) {
-            String pathName = notification.getPath().substring(prefix.length());
-            removeCache(pathName);
+            handleRemoveExchange(pathName);
             log.warn("A Delete request is processed globally, so delete the exchange {} on this broker", pathName);
+
         } else if (notification.getType().equals(NotificationType.Modified)) {
             // change the routing key
-            String pathName = notification.getPath().substring(prefix.length());
-            metadataService.getTopicMetadata(ExchangeData.class, notification.getPath(), true)
+            metadataService.getMetadata(ExchangeData.class, notification.getPath(), true)
                 .thenAccept(ops -> {
                     ops.ifPresent(exchangeData -> {
-//                        log.info();
-                        refreshRouting(pathName, exchangeData.getBindsData());
+                        handleRefreshRouters(pathName, exchangeData.getBindsData());
                     });
                 });
+
         }
     }
 
-    private void refreshRouting(String pathName, List<BindData> bindsData) {
-
+    private void handleRefreshRouters(String pathName, List<BindData> bindsData) {
+        // do something
     }
 
-    public void removeCache(String name) {
+    public void handleRemoveExchange(String name) {
         if (log.isDebugEnabled()) {
             log.debug("Exchange:{} has been removed from cache", name);
         }
-        exchangeMap.remove(name);
+        CompletableFuture<Optional<Exchange>> removeFuture = exchangeMap.remove(name);
+        if (removeFuture != null) {
+            // must present
+            removeFuture.thenAccept(ops -> ops.get().close());
+        }
     }
 
     private String generatePath(String tenant, String namespace, String shortName) {
         return prefix + tenant + "/" + namespace + "/" + shortName;
     }
 
-    private Exchange recoveryExchange(String name, ExchangeData exchangeData) {
-
+    private Exchange recoveryExchange(ExchangeData exchangeData) {
+        String name = exchangeData.getName();
         String typeName = exchangeData.getType();
         boolean autoDelete = exchangeData.isAutoDelete();
         boolean internal = exchangeData.isInternal();

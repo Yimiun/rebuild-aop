@@ -107,6 +107,7 @@ public abstract class AbstractExchange implements Exchange {
         if (stateReference.compareAndSet(this, State.On, State.Closed)) {
             routerMap.clear();
             arguments.clear();
+            // Reduce the reference count of active routing related Pulsar Producers
             completableFuture.complete(null);
         } else {
             completableFuture.completeExceptionally(new IOException("Already close"));
