@@ -26,11 +26,14 @@
     <modelVersion>4.0.0</modelVersion>
 
     <packaging>pom</packaging>
+    <modules>
+        <module>amqp-impl</module>
+    </modules>
 
-    <groupId>io.streamnative.pulsar.handlers</groupId>
+    <groupId>io.yuan.pulsar.handlers</groupId>
     <artifactId>pulsar-protocol-handler-amqp-parent</artifactId>
     <version>2.4.1</version>
-    <name>StreamNative :: Pulsar Protocol Handler :: AoP Parent</name>
+    <name>Yuan :: Pulsar Protocol Handler :: AoP Parent</name>
     <description>Parent for AMQP on Pulsar implemented using Pulsar Protocol Handler.</description>
 
     <properties>
@@ -59,7 +62,7 @@
         <license-maven-plugin.version>3.0.rc1</license-maven-plugin.version>
         <maven-checkstyle-plugin.version>3.1.1</maven-checkstyle-plugin.version>
         <maven-compiler-plugin.version>3.10.1</maven-compiler-plugin.version>
-        <maven-surefire-plugin.version>3.0.0-M1</maven-surefire-plugin.version>
+        <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
         <os-maven-plugin.version>1.4.1.Final</os-maven-plugin.version>
         <puppycrawl.checkstyle.version>8.37</puppycrawl.checkstyle.version>
         <spotbugs-maven-plugin.version>4.2.2</spotbugs-maven-plugin.version>
@@ -287,8 +290,9 @@
             </plugin>
 
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>${maven-compiler-plugin.version}</version>
+                <version>3.5.1</version>
                 <configuration>
                     <!--release>${project.compiler.release}</release-->
                     <source>${maven.compiler.source}</source>
@@ -306,6 +310,7 @@
             </plugin>
 
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
                 <configuration>
