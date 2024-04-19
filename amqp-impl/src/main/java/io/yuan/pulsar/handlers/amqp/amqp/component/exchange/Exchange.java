@@ -1,5 +1,6 @@
-package io.yuan.pulsar.handlers.amqp.amqp.component;
+package io.yuan.pulsar.handlers.amqp.amqp.component.exchange;
 
+import io.yuan.pulsar.handlers.amqp.amqp.component.Router;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 import java.util.List;
 import java.util.Map;

@@ -3,8 +3,8 @@ package io.yuan.pulsar.handlers.amqp.amqp.service;
 import io.vertx.core.impl.ConcurrentHashSet;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
-import io.yuan.pulsar.handlers.amqp.amqp.component.Exchange;
-import io.yuan.pulsar.handlers.amqp.amqp.component.PersistentExchange;
+import io.yuan.pulsar.handlers.amqp.amqp.component.exchange.Exchange;
+import io.yuan.pulsar.handlers.amqp.amqp.component.exchange.PersistentExchange;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
 import io.yuan.pulsar.handlers.amqp.utils.FutureExceptionUtils;
@@ -19,6 +19,10 @@ import org.apache.pulsar.metadata.api.Notification;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Slf4j
 public class ExchangeServiceImpl implements ExchangeService {
@@ -37,8 +41,6 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final Set<String> nonPersistentSet = new ConcurrentHashSet<>();
 
-    private final Object lock = new Object();
-
     public ExchangeServiceImpl(MetadataService metadataService,
                                AmqpServiceConfiguration amqpServiceConfiguration) {
         this.metadataService = metadataService;
@@ -49,7 +51,7 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     @Override
     public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName, String namespaceName) {
-        return getExchange(name, tenantName, namespaceName, false, false);
+        return getExchange(name, tenantName, namespaceName, true, false);
     }
 
     @Override
@@ -61,7 +63,6 @@ public class ExchangeServiceImpl implements ExchangeService {
      * refresh = true:   equals  store.get()
      * refresh = false:  equals  cache.get()
      * ensure exchange singleton
-     * ensure multi threads safety
      *
      *    return val :
      *    if (empty) closeConnection
@@ -73,29 +74,26 @@ public class ExchangeServiceImpl implements ExchangeService {
         String path = generatePath(tenantName, namespaceName, name);
         if (exchangeMap.containsKey(path)) {
             CompletableFuture<Optional<Exchange>> res = exchangeMap.get(path);
-            return res == null ? CompletableFuture.completedFuture(Optional.empty()) : res;
+            return res != null ? res : CompletableFuture.completedFuture(Optional.empty());
         }
-        // to avoid delete-get metadata multi threads operation going wrong, which causes exchange stats wrong
-        synchronized (lock) {
-            // singleton, one exchange only has one instance
-            if (exchangeMap.containsKey(path)) {
-                return exchangeMap.get(path);
-            }
-            return metadataService.getMetadata(ExchangeData.class, path, refresh)
-                .thenCompose(metadataOps -> {
-                    if (metadataOps.isEmpty()) {
-                        log.warn("Exchange:{} metadata is empty!", name);
-                        return CompletableFuture.completedFuture(Optional.empty());
-                    }
-                    CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
-                    Exchange exchange = recoveryExchange(metadataOps.get());
-                    completableFuture.complete(Optional.of(exchange));
-                    if (!query) {
-                        exchangeMap.put(path, completableFuture);
-                    }
-                    return completableFuture;
-                });
-        }
+        return metadataService.getMetadata(ExchangeData.class, path, refresh)
+            .thenCompose(metadataOps -> {
+                if (metadataOps.isEmpty()) {
+                    log.warn("Exchange:{} metadata is empty!", name);
+                    return CompletableFuture.completedFuture(Optional.empty());
+                }
+                // need to avoid dirty-reading
+                // if map does not have this exchange, the thread's time slice exhausted here.
+                // At the same moment another thread remove exchange Metadata, and remove "null" from map
+                // then the code below will cause a dirty reading problem
+                CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
+                Exchange exchange = recoveryExchange(metadataOps.get());
+                completableFuture.complete(Optional.of(exchange));
+                if (!query) {
+                    exchangeMap.put(path, completableFuture);
+                }
+                return completableFuture;
+            });
     }
 
     /**
@@ -176,25 +174,21 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     @Override
     public void close() {
-        synchronized (lock) {
-            exchangeMap.clear();
-            nonPersistentSet.clear();
-        }
+        exchangeMap.clear();
+        nonPersistentSet.clear();
     }
 
     @Override
     public void removeAllExchanges(String tenantName, String namespaceName) {
         String path = generatePath(tenantName, namespaceName);
-        synchronized (lock) {
-            metadataService.deleteMetadataRecursive(path)
-                .whenComplete((__, ex) -> {
-                    if (ex != null) {
-                        log.error("Remove exchange metadata wrong", ex);
-                        return;
-                    }
-                    log.info("Successfully removed namespace path:{}", path);
-                });
-        }
+        metadataService.deleteMetadataRecursive(path)
+            .whenComplete((__, ex) -> {
+                if (ex != null) {
+                    log.error("Remove exchange metadata wrong", ex);
+                    return;
+                }
+                log.info("Successfully removed namespace path:{}", path);
+            });
     }
 
     /**
@@ -204,16 +198,14 @@ public class ExchangeServiceImpl implements ExchangeService {
     @Override
     public CompletableFuture<Void> removeExchange(String name, String tenantName, String namespaceName) {
         String path = generatePath(tenantName, namespaceName, name);
-        synchronized (lock) {
-            return metadataService.deleteMetadata(path)
-                .whenComplete((__, ex) -> {
-                    if (ex != null) {
-                        log.error("Remove exchange metadata wrong", ex);
-                        return;
-                    }
-                    log.info("Successfully delete exchange:{}", path);
-                });
-        }
+        return metadataService.deleteMetadata(path)
+            .whenComplete((__, ex) -> {
+                if (ex != null) {
+                    log.error("Remove exchange metadata wrong", ex);
+                    return;
+                }
+                log.info("Successfully delete exchange:{}", path);
+            });
     }
 
     private void handleNotification(Notification notification) {
@@ -274,6 +266,7 @@ public class ExchangeServiceImpl implements ExchangeService {
             // must present
             removeFuture.thenAccept(ops -> ops.get().close());
         }
+        metadataService.invalidPath(ExchangeData.class, name);
     }
 
     private void generateDefaultExchange() {
@@ -288,6 +281,7 @@ public class ExchangeServiceImpl implements ExchangeService {
         return stringJoiner.toString();
     }
 
+    //add check
     private Exchange recoveryExchange(ExchangeData exchangeData) {
         String name = exchangeData.getName();
         String typeName = exchangeData.getType();

@@ -1,7 +1,6 @@
 package io.yuan.pulsar.handlers.amqp.admin;
 
 import io.yuan.pulsar.handlers.amqp.AmqpProtocolHandler;
-import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeService;
 import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeServiceImpl;
 import io.yuan.pulsar.handlers.amqp.amqp.service.TopicService;
 

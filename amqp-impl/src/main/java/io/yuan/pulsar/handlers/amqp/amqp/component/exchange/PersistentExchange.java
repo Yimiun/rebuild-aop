@@ -1,4 +1,4 @@
-package io.yuan.pulsar.handlers.amqp.amqp.component;
+package io.yuan.pulsar.handlers.amqp.amqp.component.exchange;
 
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 

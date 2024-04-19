@@ -1,4 +1,4 @@
-package io.yuan.pulsar.handlers.amqp.amqp.component;
+package io.yuan.pulsar.handlers.amqp.amqp.component.topic;
 
 import org.apache.pulsar.broker.service.Topic;
 

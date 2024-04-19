@@ -1,6 +1,6 @@
 package io.yuan.pulsar.handlers.amqp.amqp.service;
 
-import io.yuan.pulsar.handlers.amqp.amqp.component.Exchange;
+import io.yuan.pulsar.handlers.amqp.amqp.component.exchange.Exchange;
 
 import java.util.Map;
 import java.util.Optional;

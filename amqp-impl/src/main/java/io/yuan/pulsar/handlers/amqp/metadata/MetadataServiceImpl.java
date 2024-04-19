@@ -1,6 +1,7 @@
 package io.yuan.pulsar.handlers.amqp.metadata;
 
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.common.util.FutureUtil;
 import org.apache.pulsar.metadata.api.*;
@@ -52,7 +53,7 @@ public class MetadataServiceImpl implements MetadataService {
         MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
         CompletableFuture<Void> completableFuture = metadataCache.create(path, metadata);
         if (refresh) {
-            metadataCache.refresh(path);
+            metadataCache.invalidate(path);
             return completableFuture.thenApplyAsync(__ -> __, executor);
         }
         return completableFuture;
@@ -62,7 +63,7 @@ public class MetadataServiceImpl implements MetadataService {
     public <T> CompletableFuture<Optional<T>> getMetadata(Class<T> clazz, String path, boolean refresh) {
         MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
         if (refresh) {
-            metadataCache.refresh(path);
+            metadataCache.invalidate(path);
             return metadataCache.get(path).thenApplyAsync(__ -> __, executor);
         }
         return metadataCache.get(path);

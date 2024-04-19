@@ -1,21 +1,20 @@
 package io.yuan.pulsar.handlers.amqp.admin;
 
 
-
 import io.yuan.pulsar.handlers.amqp.admin.view.ExchangeView;
-import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
 import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeServiceImpl;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.pulsar.common.util.RestException;
 
-import javax.ws.rs.*;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 @Path("/exchange")
 @Produces(MediaType.APPLICATION_JSON)
@@ -27,7 +26,7 @@ public class ExchangeResource extends BaseResource {
         Map<String, Object> res = new HashMap<>();
         getExchangeService().getExchangeMap().forEach((key, value) -> {
             if (value.isDone()) {
-                res.put(key.substring(ExchangeServiceImpl.prefix.length()), value.join());
+                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.prefix.length()), ex));
             } else {
                 res.put(key.substring(ExchangeServiceImpl.prefix.length()), value);
             }
@@ -41,7 +40,7 @@ public class ExchangeResource extends BaseResource {
                             @PathParam("tenant") String tenant,
                             @PathParam("vhost") String vhost,
                             @PathParam("exchange") String exchange) {
-        getExchangeService().queryExchange(exchange, tenant, vhost)
+        getExchangeService().getExchange(exchange, tenant, vhost)
             .thenAccept(ops -> {
                 ops.ifPresentOrElse(ex -> {
                     response.resume(
