@@ -4,53 +4,90 @@ import io.netty.buffer.ByteBuf;
 import io.yuan.pulsar.handlers.amqp.amqp.component.consumer.AmqpConsumer;
 import io.yuan.pulsar.handlers.amqp.amqp.component.message.AmqpMessage;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
-import org.apache.pulsar.client.api.Consumer;
+import io.yuan.pulsar.handlers.amqp.amqp.pojo.QueueData;
+import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
+import io.yuan.pulsar.handlers.amqp.exception.ServiceRuntimeException;
 import org.apache.pulsar.broker.service.Topic;
 import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.naming.TopicName;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class AbstractQueue implements Queue {
 
-    private final NamespaceName namespaceName;
+    protected final QueueData queueData;
 
-    private Topic topic;
+    protected final String tenant;
 
-    private String name;
+    protected final String namespace;
 
-    private boolean durable;
+    protected Topic topic;
 
-    private boolean autoDelete;
+    protected String name;
 
-    private boolean internal;
+    protected boolean durable;
 
-    private boolean exclusive;
+    protected boolean autoDelete;
 
-    private List<BindData> bindData;
+    protected boolean internal;
 
-    private final Map<String, String> arguments;
+    protected boolean exclusive;
 
-    public AbstractQueue(Topic topic, String name, NamespaceName namespaceName,
-                         boolean durable, boolean autoDelete,
-                         boolean internal, boolean exclusive, List<BindData> bindData,
-                         Map<String, String> arguments) {
+    protected Set<BindData> bindData;
+
+    protected final Map<String, Set<BindData>> deadLetterMap = new ConcurrentHashMap<>();
+
+    protected final Map<String, String> arguments;
+
+    public AbstractQueue(Topic topic, QueueData queueData) {
+        this.queueData = queueData;
         this.topic = topic;
-        this.name = name;
-        this.namespaceName = namespaceName;
-        this.durable = durable;
-        this.autoDelete = autoDelete;
-        this.internal = internal;
-        this.exclusive = exclusive;
-        this.bindData = bindData;
-        this.arguments = arguments;
+        this.name = queueData.getName();
+        this.tenant = queueData.getTenant();
+        this.namespace = queueData.getVhost();
+        this.durable = queueData.isDurable();
+        this.autoDelete = queueData.isAutoDelete();
+        this.internal = queueData.isInternal();
+        this.exclusive = queueData.isExclusive();
+        this.bindData = queueData.getBindsData();
+        this.arguments = queueData.getArguments();
     }
 
     @Override
     public CompletableFuture<Void> route(TopicName from, ByteBuf buf, String routingKey) {
         return null;
+    }
+
+    @Override
+    public synchronized CompletableFuture<Void> addBindData(BindData bindData) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        if (this.bindData.add(bindData)) {
+            future.complete(null);
+        } else {
+            future.completeExceptionally(new ServiceRuntimeException.DuplicateBindException());
+        }
+        return future;
+    }
+
+    @Override
+    public synchronized CompletableFuture<Void> removeBindData(BindData bindData) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        if (this.bindData.remove(bindData)) {
+            future.complete(null);
+        } else {
+            future.completeExceptionally(new NotFoundException.BindNotFoundException());
+        }
+        return null;
+    }
+
+    @Override
+    public QueueData getQueueData() {
+        return this.queueData;
     }
 
     @Override
@@ -94,7 +131,7 @@ public abstract class AbstractQueue implements Queue {
     }
 
     @Override
-    public List<BindData> getBindData() {
+    public Set<BindData> getBindData() {
         return bindData;
     }
 
@@ -115,12 +152,12 @@ public abstract class AbstractQueue implements Queue {
 
     @Override
     public String getVhost() {
-        return namespaceName.getLocalName();
+        return this.namespace;
     }
 
     @Override
     public String getTenant() {
-        return namespaceName.getTenant();
+        return this.tenant;
     }
 
     @Override

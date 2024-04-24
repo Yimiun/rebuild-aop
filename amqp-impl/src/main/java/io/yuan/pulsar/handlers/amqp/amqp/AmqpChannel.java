@@ -1,7 +1,11 @@
 package io.yuan.pulsar.handlers.amqp.amqp;
 
+import io.yuan.pulsar.handlers.amqp.amqp.service.BindService;
 import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeService;
+import io.yuan.pulsar.handlers.amqp.amqp.service.QueueService;
 import io.yuan.pulsar.handlers.amqp.broker.AmqpBrokerService;
+import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
+import io.yuan.pulsar.handlers.amqp.utils.FutureExceptionUtils;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.common.naming.NamespaceName;
@@ -9,13 +13,12 @@ import org.apache.qpid.server.bytebuffer.QpidByteBuffer;
 import org.apache.qpid.server.protocol.ErrorCodes;
 import org.apache.qpid.server.protocol.v0_8.AMQShortString;
 import org.apache.qpid.server.protocol.v0_8.FieldTable;
-import org.apache.qpid.server.protocol.v0_8.transport.BasicContentHeaderProperties;
-import org.apache.qpid.server.protocol.v0_8.transport.ExchangeDeleteOkBody;
-import org.apache.qpid.server.protocol.v0_8.transport.ServerChannelMethodProcessor;
+import org.apache.qpid.server.protocol.v0_8.transport.*;
 
 import javax.validation.constraints.NotNull;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static io.yuan.pulsar.handlers.amqp.amqp.service.impl.BindServiceImpl.EXCHANGE_TYPE;
 import static org.apache.qpid.server.protocol.ErrorCodes.INTERNAL_ERROR;
 
 @Slf4j
@@ -32,6 +35,10 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
 
     private final ExchangeService exchangeService;
 
+    private final QueueService queueService;
+
+    private final BindService bindService;
+
     private final NamespaceName namespaceName;
 
     public AmqpChannel(int channelId, AmqpConnection connection, AmqpBrokerService amqpBrokerService) {
@@ -39,6 +46,8 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
         this.connection = connection;
         this.brokerService = amqpBrokerService;
         this.exchangeService = brokerService.getExchangeService();
+        this.queueService = brokerService.getQueueService();
+        this.bindService = brokerService.getBindService();
         this.namespaceName = connection.getNamespaceName();
     }
 
@@ -80,11 +89,16 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
         String name = AMQShortString.toString(exchangeName);
         String tp = AMQShortString.toString(type);
         if (passive) {
-            exchangeService.getExchange(name, namespaceName.getTenant(), namespaceName.getLocalName())
-                .thenAccept(ops -> {
-                    if (ops.isEmpty()) {
+            exchangeService.getExchangeAsync(name, namespaceName.getTenant(), namespaceName.getLocalName())
+                .whenComplete((ops, ex) -> {
+                    if (ops.isEmpty() || ex != null &&
+                        FutureExceptionUtils.decodeFuture(ex) instanceof NotFoundException.ExchangeNotFoundException) {
+                            log.error("[{}][{}] ExchangeType should be set when createIfMissing is true.", namespaceName, exchangeName);
+                            String sb = "There is no exchange named:" + exchangeName;
+                            handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, sb);
+                    } else if (ex != null) {
                         log.error("[{}][{}] ExchangeType should be set when createIfMissing is true.", namespaceName, exchangeName);
-                        String sb = "There is no exchange named:" + exchangeName;
+                        String sb = "Error when fetching exchange metadata:" + FutureExceptionUtils.decodeFuture(ex);
                         handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, sb);
                     } else {
                         connection.writeFrame(
@@ -93,13 +107,17 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
                 });
             return;
         }
-        exchangeService.createExchange(name, namespaceName.getTenant(), namespaceName.getLocalName(), tp,
+        exchangeService.createExchangeAsync(name, namespaceName.getTenant(), namespaceName.getLocalName(), tp,
             durable, autoDelete, internal, FieldTable.convertToMap(arguments))
-                .thenAccept(ops -> {
+                .whenComplete((ops, ex) -> {
                     if (ops.isEmpty()) {
-                        log.error("[{}][{}] ExchangeType should be set when createIfMissing is true.", namespaceName, exchangeName);
-                        String sb = "There is no exchange named:" + exchangeName;
-                        handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, sb);
+                        log.error("[{}][{}] Create exchange failed, metadata empty.", namespaceName, exchangeName);
+                        String sb = "Create exchange:" + exchangeName + "failed, metadata empty!";
+                        handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.RESOURCE_ERROR, sb);
+                    } else if (ex != null) {
+                        log.error("[{}][{}] Exception when creating exchange.", namespaceName, exchangeName, ex);
+                        String sb = "Exception when creating exchange:" + exchangeName + "," + ex;
+                        handleAoPException(ExceptionType.CLOSING_CHANNEL, INTERNAL_ERROR, sb);
                     } else {
                         connection.writeFrame(
                             connection.getMethodRegistry().createExchangeDeclareOkBody().generateFrame(channelId));
@@ -121,10 +139,16 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
             handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, sb);
         }
         String exchange = AMQShortString.toString(exchangeName);
-        exchangeService.removeExchange(exchange, namespaceName.getTenant(), namespaceName.getLocalName())
+        exchangeService.removeExchangeAsync(exchange, namespaceName.getTenant(), namespaceName.getLocalName())
             .whenComplete((__, ex) -> {
-                ExchangeDeleteOkBody responseBody = connection.getMethodRegistry().createExchangeDeleteOkBody();
-                connection.writeFrame(responseBody.generateFrame(channelId));
+                if (ex != null) {
+                    log.error("[{}][{}] Delete exchange failed, metadata service wrong.", namespaceName, exchangeName);
+                    String sb = "Delete exchange:" + exchangeName + "failed, metadata service wrong!";
+                    handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.RESOURCE_ERROR, sb);
+                } else {
+                    ExchangeDeleteOkBody responseBody = connection.getMethodRegistry().createExchangeDeleteOkBody();
+                    connection.writeFrame(responseBody.generateFrame(channelId));
+                }
             });
     }
 
@@ -139,8 +163,39 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
     }
 
     @Override
-    public void receiveQueueBind(AMQShortString amqShortString, AMQShortString amqShortString1, AMQShortString amqShortString2, boolean b, FieldTable fieldTable) {
-
+    public void receiveQueueBind(AMQShortString queue, AMQShortString exchange, AMQShortString bindingKey,
+                                 boolean nowait, FieldTable argumentsTable) {
+        if (log.isDebugEnabled()) {
+            log.debug("RECV[{}] QueueBind[ queue: {}, exchange: {}, bindingKey:{}, nowait:{}, arguments:{} ]",
+                channelId, queue, exchange, bindingKey, nowait, argumentsTable);
+        }
+        String exchangeName = AMQShortString.toString(exchange);
+        String routingKey = bindingKey != null ? AMQShortString.toString(bindingKey) : "";
+        String queueName = AMQShortString.toString(queue);
+        bindService.bind(namespaceName.getTenant(), namespaceName.getLocalName(), exchangeName, queueName,
+                EXCHANGE_TYPE, routingKey, FieldTable.convertToMap(argumentsTable))
+            .whenComplete((__, ex) -> {
+                if (ex != null) {
+                    Throwable real = FutureExceptionUtils.decodeFuture(ex);
+                    log.error("Failed to bind queue {} to exchange {}, msg:{}", queue, exchange, ex);
+                    if (real instanceof NotFoundException.QueueNotFoundException) {
+                        String msg = String.format("Queue: %s not found", queueName);
+                        handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, msg);
+                        return;
+                    }
+                    if (real instanceof NotFoundException.ExchangeNotFoundException) {
+                        String msg = String.format("Exchange: %s not found", exchangeName);
+                        handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, msg);
+                        return;
+                    }
+                    String msg = String.format("Internal exception:%s", real.getCause());
+                    handleAoPException(ExceptionType.CLOSING_CONNECTION, INTERNAL_ERROR, msg);
+                    return;
+                }
+                MethodRegistry methodRegistry = connection.getMethodRegistry();
+                AMQMethodBody responseBody = methodRegistry.createQueueBindOkBody();
+                connection.writeFrame(responseBody.generateFrame(channelId));
+            });
     }
 
     @Override

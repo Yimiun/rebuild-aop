@@ -7,8 +7,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @JsonDeserialize(as = ExchangeData.class)
 @Getter
@@ -21,15 +21,18 @@ public class ExchangeData {
     @JsonProperty
     private String type;
     @JsonProperty
+    private String tenant;
+    @JsonProperty
     private String vhost;//namespace
     @JsonProperty
     private boolean internal;
     @JsonProperty
     private boolean durable;
-    @JsonProperty
+    @JsonProperty("auto_delete")
     private boolean autoDelete;
-    @JsonProperty
-    private List<BindData> bindsData;
+    @JsonProperty("bindings")
+    private Set<BindData> bindsData;
     @JsonProperty
     private Map<String, Object> arguments;
+
 }

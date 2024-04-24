@@ -4,20 +4,25 @@ import io.yuan.pulsar.handlers.amqp.amqp.component.Router;
 import io.yuan.pulsar.handlers.amqp.amqp.component.consumer.AmqpConsumer;
 import io.yuan.pulsar.handlers.amqp.amqp.component.message.AmqpMessage;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
+import io.yuan.pulsar.handlers.amqp.amqp.pojo.QueueData;
 import org.apache.pulsar.broker.service.Topic;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 public interface Queue extends Router {
 
     static final String EXCLUSIVE_PROPERTY = "exclusive_connection";
 
+    QueueData getQueueData();
+
     String getName();
 
     boolean isDurable();
 
-    List<BindData> getBindData();
+    Set<BindData> getBindData();
 
     Map<String, Object> getArguments();
 
@@ -40,6 +45,10 @@ public interface Queue extends Router {
     long clearQueue();
 
     Topic getTopic();
+
+    CompletableFuture<Void> addBindData(BindData bindData);
+
+    CompletableFuture<Void> removeBindData(BindData bindData);
 
     void addMessage(AmqpMessage message);
 

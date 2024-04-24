@@ -2,7 +2,7 @@ package io.yuan.pulsar.handlers.amqp.admin;
 
 
 import io.yuan.pulsar.handlers.amqp.admin.view.ExchangeView;
-import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeServiceImpl;
+import io.yuan.pulsar.handlers.amqp.amqp.service.impl.ExchangeServiceImpl;
 import org.apache.pulsar.common.util.RestException;
 
 import javax.ws.rs.GET;
@@ -26,7 +26,7 @@ public class ExchangeResource extends BaseResource {
         Map<String, Object> res = new HashMap<>();
         getExchangeService().getExchangeMap().forEach((key, value) -> {
             if (value.isDone()) {
-                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.prefix.length()), ex));
+                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.prefix.length()), ex.getExchangeData()));
             } else {
                 res.put(key.substring(ExchangeServiceImpl.prefix.length()), value);
             }
@@ -40,7 +40,7 @@ public class ExchangeResource extends BaseResource {
                             @PathParam("tenant") String tenant,
                             @PathParam("vhost") String vhost,
                             @PathParam("exchange") String exchange) {
-        getExchangeService().getExchange(exchange, tenant, vhost)
+        getExchangeService().getExchangeAsync(exchange, tenant, vhost)
             .thenAccept(ops -> {
                 ops.ifPresentOrElse(ex -> {
                     response.resume(

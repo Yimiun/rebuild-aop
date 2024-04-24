@@ -6,6 +6,7 @@ import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Data
 @AllArgsConstructor
@@ -17,6 +18,6 @@ public class ExchangeView {
     private boolean durable;
     private boolean internal;
     private boolean auto_delete;
-    private List<BindData> bind_data;
+    private Set<BindData> bind_data;
     private Map<String, Object> arguments;
 }

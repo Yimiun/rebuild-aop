@@ -1,4 +1,4 @@
-package io.yuan.pulsar.handlers.amqp.amqp.service;
+package io.yuan.pulsar.handlers.amqp.amqp.service.impl;
 
 import io.vertx.core.impl.ConcurrentHashSet;
 import io.yuan.pulsar.handlers.amqp.amqp.AmqpConnection;
@@ -14,13 +14,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-public class AmqpConnectionService {
+public class AmqpConnectionServiceImpl {
 
     private final Map<NamespaceName, Set<AmqpConnection>> connectionsMap = new HashMap<>();
 
     private final StatsProvider connectionStats;
 
-    public AmqpConnectionService(MetadataService metadataService) {
+    public AmqpConnectionServiceImpl(MetadataService metadataService) {
         this.connectionStats = new PrometheusMetricsProvider();
         metadataService.registerListener(this::handleNamespaceNotification);
     }

@@ -5,10 +5,12 @@ import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.common.util.FutureUtil;
 import org.apache.pulsar.metadata.api.*;
+import org.apache.pulsar.metadata.cache.impl.MetadataCacheImpl;
 
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 
@@ -49,24 +51,28 @@ public class MetadataServiceImpl implements MetadataService {
     }
 
     @Override
-    public <T> CompletableFuture<Void> updateMetadata(Class<T> clazz, T metadata, String path, boolean refresh) {
+    public <T> CompletableFuture<Void> createMetadata(Class<T> clazz, T metadata, String path, boolean refresh) {
         MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
         CompletableFuture<Void> completableFuture = metadataCache.create(path, metadata);
         if (refresh) {
-            metadataCache.invalidate(path);
-            return completableFuture.thenApplyAsync(__ -> __, executor);
+            metadataCache.refresh(path);
         }
-        return completableFuture;
+        return completableFuture.thenApplyAsync(__ -> __, executor);
+    }
+
+    @Override
+    public <T> CompletableFuture<Void> modifyUpdateMetadata(Class<T> clazz, String path, Function<T, T> function) {
+        MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
+        return metadataCache.readModifyUpdate(path, function).thenApplyAsync(__ -> null, executor);
     }
 
     @Override
     public <T> CompletableFuture<Optional<T>> getMetadata(Class<T> clazz, String path, boolean refresh) {
         MetadataCache<T> metadataCache = createOrGetMetadataCache(clazz);
         if (refresh) {
-            metadataCache.invalidate(path);
-            return metadataCache.get(path).thenApplyAsync(__ -> __, executor);
+            metadataCache.refresh(path);
         }
-        return metadataCache.get(path);
+        return metadataCache.get(path).thenApplyAsync(__ -> __, executor);
     }
 
     @Override
@@ -118,6 +124,11 @@ public class MetadataServiceImpl implements MetadataService {
     @Override
     public CompletableFuture<Void> deleteMetadataRecursive(String path) {
         return metadataStore.deleteRecursive(path);
+    }
+
+    @Override
+    public void runMetadataCallback(Runnable runnable) {
+        executor.submit(runnable);
     }
 
     @Override

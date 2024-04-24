@@ -139,7 +139,7 @@
 //            }
 //        }
 //
-//        setProp(builder, PROP_EXCHANGE, incomingMessage.getMessagePublishInfo().getExchange());
+//        setProp(builder, PROP_EXCHANGE, incomingMessage.getMessagePublishInfo().getExchangeAsync());
 //        setProp(builder, PROP_IMMEDIATE, incomingMessage.getMessagePublishInfo().isImmediate());
 //        setProp(builder, PROP_MANDATORY, incomingMessage.getMessagePublishInfo().isMandatory());
 //        setProp(builder, PROP_ROUTING_KEY, incomingMessage.getMessagePublishInfo().getRoutingKey());

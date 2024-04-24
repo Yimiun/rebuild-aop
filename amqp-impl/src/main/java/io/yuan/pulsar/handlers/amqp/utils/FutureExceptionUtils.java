@@ -4,9 +4,9 @@ import java.util.concurrent.CompletionException;
 
 public class FutureExceptionUtils {
 
-    public static Throwable DecodeFuture(Throwable e) {
+    public static Throwable decodeFuture(Throwable e) {
         if (e instanceof CompletionException) {
-            return DecodeFuture(e.getCause());
+            return decodeFuture(e.getCause());
         }
         return e;
     }

@@ -1,6 +1,10 @@
 package io.yuan.pulsar.handlers.amqp.broker;
 
 import io.yuan.pulsar.handlers.amqp.amqp.service.*;
+import io.yuan.pulsar.handlers.amqp.amqp.service.impl.AmqpConnectionServiceImpl;
+import io.yuan.pulsar.handlers.amqp.amqp.service.impl.BindServiceImpl;
+import io.yuan.pulsar.handlers.amqp.amqp.service.impl.ExchangeServiceImpl;
+import io.yuan.pulsar.handlers.amqp.amqp.service.impl.QueueServiceImpl;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataServiceImpl;
@@ -11,9 +15,6 @@ import io.yuan.pulsar.handlers.amqp.proxy.TopicOwnershipListener;
 import lombok.Getter;
 import org.apache.pulsar.broker.PulsarService;
 import org.apache.pulsar.common.naming.TopicName;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 public class AmqpBrokerService {
 
@@ -26,11 +27,15 @@ public class AmqpBrokerService {
     @Getter
     ExchangeService exchangeService;
     @Getter
+    QueueService queueService;
+    @Getter
+    BindService bindService;
+    @Getter
     MetadataService metadataService;
     @Getter
     BundleListener bundleListener;
     @Getter
-    AmqpConnectionService amqpConnectionService;
+    AmqpConnectionServiceImpl amqpConnectionService;
 
 //    @Getter
 //    private AmqpLookupHandler amqpLookupHandler;
@@ -41,8 +46,10 @@ public class AmqpBrokerService {
         this.metadataService = new MetadataServiceImpl(pulsarService.getLocalMetadataStore());
         this.topicService = new TopicService(metadataService, pulsarService);
         this.exchangeService = new ExchangeServiceImpl(metadataService, amqpServiceConfiguration);
+        this.queueService = new QueueServiceImpl(metadataService, amqpConfig, pulsarService);
+        this.bindService = new BindServiceImpl(exchangeService, queueService, metadataService);
         this.bundleListener = new BundleListener(pulsarService.getNamespaceService());
-        this.amqpConnectionService = new AmqpConnectionService(metadataService);
+        this.amqpConnectionService = new AmqpConnectionServiceImpl(metadataService);
         bundleListener.addTopicOwnershipListener(new TopicOwnershipListener() {
             @Override
             public void whenLoad(TopicName topicName) {

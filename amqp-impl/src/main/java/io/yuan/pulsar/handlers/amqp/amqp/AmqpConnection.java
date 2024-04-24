@@ -153,7 +153,7 @@ public class AmqpConnection extends AmqpCommandDecoder implements ServerMethodPr
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        Throwable c = FutureExceptionUtils.DecodeFuture(cause);
+        Throwable c = FutureExceptionUtils.decodeFuture(cause);
         log.error("[{}] Got exception: {}", remoteAddress, c);
         close();
     }

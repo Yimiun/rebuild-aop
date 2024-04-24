@@ -2,17 +2,13 @@ package io.yuan.pulsar.handlers.amqp.amqp.pojo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @JsonDeserialize(as = QueueData.class)
-@Getter
-@Setter
+@Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class QueueData {
@@ -20,19 +16,19 @@ public class QueueData {
     @JsonProperty
     private String name;
     @JsonProperty
-    private String tenant;//namespace
+    private String tenant;
     @JsonProperty
     private String vhost;//namespace
     @JsonProperty
     private boolean internal;
     @JsonProperty
     private boolean durable;
-    @JsonProperty
+    @JsonProperty("auto_delete")
     private boolean autoDelete;
     @JsonProperty
     private boolean exclusive;
-    @JsonProperty
-    private List<BindData> bindsData;
+    @JsonProperty("bind_data")
+    private Set<BindData> bindsData;
     @JsonProperty
     private Map<String, String> arguments;
 }

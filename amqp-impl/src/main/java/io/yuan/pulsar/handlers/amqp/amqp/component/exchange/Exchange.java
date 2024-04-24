@@ -2,8 +2,11 @@ package io.yuan.pulsar.handlers.amqp.amqp.component.exchange;
 
 import io.yuan.pulsar.handlers.amqp.amqp.component.Router;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
+import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
+
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public interface Exchange extends Router {
@@ -34,7 +37,15 @@ public interface Exchange extends Router {
         }
     }
 
-    List<BindData> getBindData();
+    CompletableFuture<Void> addBindData(BindData bindData);
+
+    CompletableFuture<Void> removeBindData(BindData bindData);
+
+    Set<BindData> getBindData();
+
+    String getTenant();
+
+    String getVhost();
 
     String getName();
 
@@ -49,6 +60,8 @@ public interface Exchange extends Router {
     Exchange.Type getType();
 
     CompletableFuture<Void> close();
+
+    ExchangeData getExchangeData();
 
     void start();
 
