@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.yuan.pulsar.handlers.amqp.amqp.component.State;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
+import io.yuan.pulsar.handlers.amqp.exception.AmqpExchangeException;
 import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
 import io.yuan.pulsar.handlers.amqp.exception.ServiceRuntimeException;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Slf4j
 public abstract class AbstractExchange implements Exchange {
@@ -31,7 +33,8 @@ public abstract class AbstractExchange implements Exchange {
     protected final boolean internal;
     protected Map<String, Object> arguments;
     protected volatile State exchangeState = State.Closed;
-    protected Set<BindData> bindData;
+    protected final ReentrantReadWriteLock bindLock = new ReentrantReadWriteLock();
+    protected final Set<BindData> bindData;
     protected final Map<String, Set<BindData>> routerMap = new ConcurrentHashMap<>();
     protected static final AtomicReferenceFieldUpdater<AbstractExchange, State> stateReference =
         AtomicReferenceFieldUpdater.newUpdater(AbstractExchange.class, State.class, "exchangeState");
@@ -53,21 +56,104 @@ public abstract class AbstractExchange implements Exchange {
 
     @Override
     public CompletableFuture<Void> route(TopicName from, ByteBuf buf, String routingKey) {
-        CompletableFuture<Void> completableFuture = new CompletableFuture<>();
-        if (exchangeState.equals(State.Closed)) {
-            log.warn("Route stopped, because the exchange:{} is deleted", exchangeName);
-            completableFuture.completeExceptionally(new IOException());
+        try {
+            bindLock.readLock().lock();
+
+            CompletableFuture<Void> completableFuture = new CompletableFuture<>();
+            if (exchangeState.equals(State.Closed)) {
+                log.warn("Route stopped, because the exchange:{} is deleted", exchangeName);
+                completableFuture.completeExceptionally(new IOException());
+            }
+            if (!exchangeName.equals(from.getLocalName())) {
+                completableFuture.completeExceptionally(new IOException());
+            }
+            return completableFuture;
+        } finally {
+            bindLock.readLock().unlock();
         }
-        if (!exchangeName.equals(from.getLocalName())) {
-            completableFuture.completeExceptionally(new IOException());
+    }
+
+    private void generateBindData(Set<BindData> bindData) {
+        try {
+            bindLock.writeLock().lock();
+            bindData.forEach(bd -> {
+                routerMap.computeIfAbsent(bd.getRoutingKey(), key -> new HashSet<>()).add(bd);
+            });
+        } finally {
+            bindLock.writeLock().unlock();
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> addBindData(BindData bindData) {
+        if (exchangeState.equals(State.Closed)) {
+            return CompletableFuture.failedFuture(new AmqpExchangeException.ExchangeAlreadyClosedException("Exchange closed"));
+        }
+        try {
+            bindLock.writeLock().lock();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            if (this.bindData.add(bindData) &&
+                routerMap.computeIfAbsent(bindData.getRoutingKey(), key -> new HashSet<>()).add(bindData)) {
+
+                future.complete(null);
+            } else {
+                log.warn("Duplicate bind data:{}", bindData);
+                // same bindData exist, don't update metadata
+                future.completeExceptionally(new ServiceRuntimeException.DuplicateBindException("Duplicate bind data"));
+            }
+            return future;
+        } finally {
+            bindLock.writeLock().unlock();
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> removeBindData(BindData bindData) {
+        if (exchangeState.equals(State.Closed)) {
+            return CompletableFuture.failedFuture(new AmqpExchangeException.ExchangeAlreadyClosedException("Exchange closed"));
+        }
+        try {
+            bindLock.writeLock().lock();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            if (this.bindData.remove(bindData)) {
+                routerMap.computeIfPresent(bindData.getRoutingKey(), (k, v) -> {
+                    if (v.remove(bindData)) {
+                        future.complete(null);
+                    } else {
+                        future.completeExceptionally(new NotFoundException.BindNotFoundException("Bind data not found"));
+                    }
+                    return v;
+                });
+            } else {
+                future.completeExceptionally(new NotFoundException.BindNotFoundException("Bind data not found"));
+            }
+            return future;
+        } finally {
+            bindLock.writeLock().unlock();
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> close() {
+        CompletableFuture<Void> completableFuture = new CompletableFuture<>();
+        if (stateReference.compareAndSet(this, State.On, State.Closed)) {
+            routerMap.clear();
+            arguments.clear();
+            // Reduce the reference count of active routing related Pulsar Producers
+            completableFuture.complete(null);
+        } else {
+            completableFuture.completeExceptionally(new IOException("Already close"));
         }
         return completableFuture;
     }
 
-    private void generateBindData(Set<BindData> bindData) {
-        bindData.forEach(bd -> {
-            routerMap.computeIfAbsent(bd.getRoutingKey(), key -> new HashSet<>()).add(bd);
-        });
+    @Override
+    public void start() {
+        if (stateReference.compareAndSet(this, State.Closed, State.On)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Exchange:{} has been initialized", this.getName());
+            }
+        }
     }
 
     @Override
@@ -101,39 +187,6 @@ public abstract class AbstractExchange implements Exchange {
     }
 
     @Override
-    public synchronized CompletableFuture<Void> addBindData(BindData bindData) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        if (this.bindData.add(bindData) &&
-                routerMap.computeIfAbsent(bindData.getRoutingKey(), key -> new HashSet<>()).add(bindData)) {
-
-            future.complete(null);
-        } else {
-            log.warn("Duplicate bind data:{}", bindData);
-            // same bindData exist, don't update metadata
-            future.completeExceptionally(new ServiceRuntimeException.DuplicateBindException());
-        }
-        return future;
-    }
-
-    @Override
-    public synchronized CompletableFuture<Void> removeBindData(BindData bindData) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        if (this.bindData.remove(bindData)) {
-            routerMap.computeIfPresent(bindData.getRoutingKey(), (k, v) -> {
-                if (v.remove(bindData)) {
-                    future.complete(null);
-                } else {
-                    future.completeExceptionally(new NotFoundException.BindNotFoundException());
-                }
-                return v;
-            });
-        } else {
-            future.completeExceptionally(new NotFoundException.BindNotFoundException());
-        }
-        return future;
-    }
-
-    @Override
     public Set<BindData> getBindData() {
         return this.bindData;
     }
@@ -151,29 +204,6 @@ public abstract class AbstractExchange implements Exchange {
     @Override
     public ExchangeData getExchangeData() {
         return this.exchangeData;
-    }
-
-    @Override
-    public CompletableFuture<Void> close() {
-        CompletableFuture<Void> completableFuture = new CompletableFuture<>();
-        if (stateReference.compareAndSet(this, State.On, State.Closed)) {
-            routerMap.clear();
-            arguments.clear();
-            // Reduce the reference count of active routing related Pulsar Producers
-            completableFuture.complete(null);
-        } else {
-            completableFuture.completeExceptionally(new IOException("Already close"));
-        }
-        return completableFuture;
-    }
-
-    @Override
-    public void start() {
-        if (stateReference.compareAndSet(this, State.Closed, State.On)) {
-            if (log.isDebugEnabled()) {
-                log.debug("Exchange:{} has been initialized", this.getName());
-            }
-        }
     }
 
     @Override

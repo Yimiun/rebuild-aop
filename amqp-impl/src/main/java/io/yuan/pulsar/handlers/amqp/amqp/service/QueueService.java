@@ -17,9 +17,5 @@ public interface QueueService {
                                                    boolean exclusive, Map<String, String> arguments,
                                                    int maxSize, int maxPriority);
 
-    CompletableFuture<Void> bind(Queue queue, BindData newData);
-
-    CompletableFuture<Void> unbind(Queue queue, BindData newData);
-
     CompletableFuture<Void> removeQueue(String queueName, String tenantName, String namespaceName);
 }

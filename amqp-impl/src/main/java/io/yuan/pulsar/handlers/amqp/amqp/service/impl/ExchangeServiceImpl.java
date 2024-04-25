@@ -3,9 +3,10 @@ package io.yuan.pulsar.handlers.amqp.amqp.service.impl;
 import io.vertx.core.impl.ConcurrentHashSet;
 import io.yuan.pulsar.handlers.amqp.amqp.component.exchange.Exchange;
 import io.yuan.pulsar.handlers.amqp.amqp.component.exchange.PersistentExchange;
-import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.ExchangeData;
+import io.yuan.pulsar.handlers.amqp.amqp.service.BindService;
 import io.yuan.pulsar.handlers.amqp.amqp.service.ExchangeService;
+import io.yuan.pulsar.handlers.amqp.broker.AmqpBrokerService;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
 import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
 import io.yuan.pulsar.handlers.amqp.exception.ServiceRuntimeException;
@@ -30,9 +31,11 @@ public class ExchangeServiceImpl implements ExchangeService {
     private final String[] defaultExchanges =
             new String[] {"amq.direct","amq.fanout","amq.headers","amq.match","amq.topic"};
 
-    public static final String prefix = "/amqp/exchange/";
+    public static final String EXCHANGE_PREFIX = "/amqp/exchange/";
 
     private final MetadataService metadataService;
+
+    private final BindService bindService;
 
     private final AmqpServiceConfiguration config;
 
@@ -41,10 +44,10 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final Set<String> nonPersistentSet = new ConcurrentHashSet<>();
 
-    public ExchangeServiceImpl(MetadataService metadataService,
-                               AmqpServiceConfiguration amqpServiceConfiguration) {
-        this.metadataService = metadataService;
-        this.config = amqpServiceConfiguration;
+    public ExchangeServiceImpl(AmqpBrokerService brokerService) {
+        this.metadataService = brokerService.getMetadataService();
+        this.bindService = brokerService.getBindService();
+        this.config = brokerService.getAmqpServiceConfiguration();
         metadataService.registerListener(this::handleNotification);
     }
 
@@ -66,7 +69,7 @@ public class ExchangeServiceImpl implements ExchangeService {
     public CompletableFuture<Optional<Exchange>> getExchange(String name, String tenantName,
                                                              String namespaceName, boolean refresh) {
 
-        String path = generatePath(tenantName, namespaceName, name);
+        String path = generateExchangePath(tenantName, namespaceName, name);
         if (exchangeMap.containsKey(path)) {
             CompletableFuture<Optional<Exchange>> res = exchangeMap.get(path);
             return res != null ? res : FutureUtil.failedFuture(new NotFoundException.ExchangeNotFoundException());
@@ -110,7 +113,7 @@ public class ExchangeServiceImpl implements ExchangeService {
                     return FutureUtil.failedFuture(new NullPointerException("empty arguments when declaring the queue"));
                 }
                 ExchangeData data = generateExchangeData(name, tenantName, namespaceName, type, autoDelete, durable, arguments);
-                String path = generatePath(tenantName, namespaceName, name);
+                String path = generateExchangePath(tenantName, namespaceName, name);
                 return metadataService.createMetadata(ExchangeData.class, data, path, false)
                     .exceptionally(ex -> {
                         Throwable e = FutureExceptionUtils.decodeFuture(ex);
@@ -129,30 +132,6 @@ public class ExchangeServiceImpl implements ExchangeService {
             });
     }
 
-    /**
-     *  Call this method and update an exchange's routerMap in metadata
-     * */
-
-    @Override
-    public CompletableFuture<Void> bind(Exchange exchange, BindData bindData) {
-        String path = generatePath(exchange.getTenant(), exchange.getVhost(), exchange.getName());
-        return exchange.addBindData(bindData).thenCompose(__ -> {
-            return metadataService.modifyUpdateMetadata(ExchangeData.class, path, data -> {
-                    return exchange.getExchangeData();
-                });
-        });
-    }
-
-    @Override
-    public CompletableFuture<Void> unbind(Exchange exchange, BindData bindData) {
-        String path = generatePath(exchange.getTenant(), exchange.getVhost(), exchange.getName());
-        return exchange.removeBindData(bindData).thenCompose(__ -> {
-            return metadataService.modifyUpdateMetadata(ExchangeData.class, path, data -> {
-                return exchange.getExchangeData();
-            });
-        });
-    }
-
     @Override
     public void close() {
         exchangeMap.clear();
@@ -161,7 +140,7 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     @Override
     public void removeAllExchangesAsync(String tenantName, String namespaceName) {
-        String path = generatePath(tenantName, namespaceName);
+        String path = generateExchangePath(tenantName, namespaceName);
         ResourceLockServiceImpl.acquireResourceLock(path);
         metadataService.deleteMetadataRecursive(path)
             .whenComplete((__, ex) -> {
@@ -180,26 +159,48 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     @Override
     public CompletableFuture<Void> removeExchangeAsync(String name, String tenantName, String namespaceName) {
-        String path = generatePath(tenantName, namespaceName, name);
-        ResourceLockServiceImpl.acquireResourceLock(path);
-        return metadataService.deleteMetadata(path)
-            .whenComplete((__, ex) -> {
-                ResourceLockServiceImpl.releaseResourceLock(path, true);
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        String path = generateExchangePath(tenantName, namespaceName, name);
+        getExchange(name, tenantName, namespaceName, true)
+            .whenComplete((exchangeOpt, ex) ->{
                 if (ex != null) {
-                    log.error("Remove exchange metadata wrong", ex);
+                    future.completeExceptionally(ex.getCause());
                     return;
                 }
-                log.info("Successfully delete exchange:{}", path);
+                if (exchangeOpt.isEmpty()) {
+                    future.completeExceptionally(new NotFoundException.ExchangeNotFoundException("Exchange not found"));
+                    return;
+                }
+                bindService.unbindAllFromQueue(exchangeOpt.get().getBindData())
+                    .whenComplete((ignore1, unbindEx) -> {
+                        if (unbindEx != null) {
+                            future.completeExceptionally(unbindEx.getCause());
+                            return;
+                        }
+                        ResourceLockServiceImpl.acquireResourceLock(path);
+                        metadataService.deleteMetadata(path)
+                            .whenComplete((ignore2, deleteEx) -> {
+                                ResourceLockServiceImpl.releaseResourceLock(path, true);
+                                if (deleteEx != null) {
+                                    log.error("Remove exchange metadata wrong", deleteEx);
+                                    future.completeExceptionally(deleteEx.getCause());
+                                    return;
+                                }
+                                log.info("Successfully delete exchange:{}", path);
+                                future.complete(null);
+                            });
+                    });
             });
+        return future;
     }
 
     private void handleNotification(Notification notification) {
         String path = notification.getPath();
-        if (path.startsWith(prefix) && path.split("/").length == 6) {
+        if (path.startsWith(EXCHANGE_PREFIX) && path.split("/").length == 6) {
             if (!exchangeMap.containsKey(path)) {
                 if (log.isDebugEnabled()) {
                     log.warn("An exchange request is processed globally, " +
-                        "but exchange {} is not initialized on this broker", path.substring(prefix.length()));
+                        "but exchange {} is not initialized on this broker", path.substring(EXCHANGE_PREFIX.length()));
                 }
                 return;
             }
@@ -209,7 +210,6 @@ public class ExchangeServiceImpl implements ExchangeService {
                     log.warn("A Delete request is processed globally, so delete the exchange {} on this broker", path);
                     break;
                 case Modified:
-                    handleRefreshRouters(path);
                     break;
             }
         } else if (NamespaceResources.pathIsFromNamespace(path)) {
@@ -217,10 +217,6 @@ public class ExchangeServiceImpl implements ExchangeService {
                 NamespaceName namespaceName = NamespaceResources.namespaceFromPath(path);
                 switch (notification.getType()) {
                     case Created:
-//                        for (String defaultExchange : defaultExchanges) {
-//                            createExchangeAsync(defaultExchange, )
-//                        }
-                        break;
                     case Modified:
                         break;
                     case Deleted:
@@ -230,10 +226,6 @@ public class ExchangeServiceImpl implements ExchangeService {
             }
         }
 
-    }
-
-    private void handleRefreshRouters(String pathName) {
-        // do something
     }
 
     // metadata thread run it
@@ -255,8 +247,8 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     }
 
-    private String generatePath(String... paras) {
-        StringJoiner stringJoiner = new StringJoiner("/", prefix, "");
+    public static String generateExchangePath(String... paras) {
+        StringJoiner stringJoiner = new StringJoiner("/", EXCHANGE_PREFIX, "");
         for(String para : paras) {
             stringJoiner.add(para);
         }

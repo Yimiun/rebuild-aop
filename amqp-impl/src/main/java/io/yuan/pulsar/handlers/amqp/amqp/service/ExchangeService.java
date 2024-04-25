@@ -20,6 +20,7 @@ public interface ExchangeService {
      * @param type: type of exchange, string format
      * @param durable: persistent or non-persistent, true if we want a persistent queue
      * @param autoDelete: true if the server should delete the queue when it is no longer in use
+     * @param internal: true if
      * */
     CompletableFuture<Optional<Exchange>> createExchangeAsync(String exchangeName, String tenantName, String namespaceName,
                                                               String type, boolean durable,
@@ -27,13 +28,6 @@ public interface ExchangeService {
                                                               Map<String, Object> arguments);
 
     CompletableFuture<Void> removeExchangeAsync(String exchangeName, String tenantName, String namespaceName);
-
-    /**
-     * @return ExchangeNotFoundException: when metadata is empty
-     * */
-    CompletableFuture<Void> bind(Exchange exchange, BindData bindData);
-
-    CompletableFuture<Void> unbind(Exchange exchange, BindData bindData);
 
     void close();
 

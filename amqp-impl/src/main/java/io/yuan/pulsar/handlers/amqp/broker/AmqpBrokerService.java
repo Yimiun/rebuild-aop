@@ -45,9 +45,9 @@ public class AmqpBrokerService {
         this.amqpServiceConfiguration = amqpConfig;
         this.metadataService = new MetadataServiceImpl(pulsarService.getLocalMetadataStore());
         this.topicService = new TopicService(metadataService, pulsarService);
-        this.exchangeService = new ExchangeServiceImpl(metadataService, amqpServiceConfiguration);
-        this.queueService = new QueueServiceImpl(metadataService, amqpConfig, pulsarService);
-        this.bindService = new BindServiceImpl(exchangeService, queueService, metadataService);
+        this.exchangeService = new ExchangeServiceImpl(this);
+        this.queueService = new QueueServiceImpl(this);
+        this.bindService = new BindServiceImpl(this);
         this.bundleListener = new BundleListener(pulsarService.getNamespaceService());
         this.amqpConnectionService = new AmqpConnectionServiceImpl(metadataService);
         bundleListener.addTopicOwnershipListener(new TopicOwnershipListener() {

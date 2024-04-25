@@ -4,26 +4,31 @@ import io.yuan.pulsar.handlers.amqp.amqp.component.queue.PersistentQueue;
 import io.yuan.pulsar.handlers.amqp.amqp.component.queue.Queue;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.BindData;
 import io.yuan.pulsar.handlers.amqp.amqp.pojo.QueueData;
+import io.yuan.pulsar.handlers.amqp.amqp.service.BindService;
 import io.yuan.pulsar.handlers.amqp.amqp.service.QueueService;
+import io.yuan.pulsar.handlers.amqp.broker.AmqpBrokerService;
 import io.yuan.pulsar.handlers.amqp.configuration.AmqpServiceConfiguration;
+import io.yuan.pulsar.handlers.amqp.exception.AmqpQueueException;
+import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
 import io.yuan.pulsar.handlers.amqp.proxy.ProxyLookupException;
-import io.yuan.pulsar.handlers.amqp.utils.FutureExceptionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pulsar.broker.PulsarServerException;
 import org.apache.pulsar.broker.PulsarService;
 import org.apache.pulsar.broker.namespace.LookupOptions;
 import org.apache.pulsar.broker.service.BrokerServiceException;
+import org.apache.pulsar.broker.service.Topic;
 import org.apache.pulsar.broker.service.persistent.PersistentTopic;
-import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.naming.TopicDomain;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.util.FutureUtil;
-import org.apache.pulsar.metadata.api.MetadataStoreException;
 import org.apache.pulsar.metadata.api.Notification;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -32,6 +37,7 @@ public class QueueServiceImpl implements QueueService {
 
     public static final String PERSISTENT_DOMAIN = TopicDomain.persistent.value();
     public static final String NON_PERSISTENT_DOMAIN = TopicDomain.non_persistent.value();
+    public static final String MANAGED_LEDGER = "/managed-ledgers/";
 
     private final MetadataService metadataService;
 
@@ -39,18 +45,17 @@ public class QueueServiceImpl implements QueueService {
 
     private final PulsarService pulsarService;
 
-    private final Map<TopicName, CompletableFuture<Optional<Queue>>> queueMap = new ConcurrentHashMap<>();
+    private final BindService bindService;
 
-    private final Map<TopicName, CompletableFuture<Void>> exclusiveMap = new ConcurrentHashMap<>();
+    private final Map<TopicName, CompletableFuture<Optional<Queue>>> queueMap = new ConcurrentHashMap<>();
 
     private final Map<TopicName, CompletableFuture<Void>> autoDeleteMap = new ConcurrentHashMap<>();
 
-    public QueueServiceImpl(MetadataService metadataService,
-                            AmqpServiceConfiguration config,
-                            PulsarService pulsarService) {
-        this.metadataService = metadataService;
-        this.config = config;
-        this.pulsarService = pulsarService;
+    public QueueServiceImpl(AmqpBrokerService brokerService) {
+        this.metadataService = brokerService.getMetadataService();
+        this.config = brokerService.getAmqpServiceConfiguration();
+        this.pulsarService = brokerService.pulsarService;
+        this.bindService = brokerService.getBindService();
         metadataService.registerListener(this::handleNotification);
     }
 
@@ -61,9 +66,9 @@ public class QueueServiceImpl implements QueueService {
             CompletableFuture<Optional<Queue>> res = queueMap.get(tpName);
             return res == null ? CompletableFuture.completedFuture(Optional.empty()) : res;
         }
-        ResourceLockServiceImpl.acquireResourceLock(tpName.getLookupName());
+        ResourceLockServiceImpl.acquireResourceLock(tpName.toString());
         if (queueMap.containsKey(tpName)) {
-            ResourceLockServiceImpl.releaseResourceLock(tpName.getLookupName());
+            ResourceLockServiceImpl.releaseResourceLock(tpName.toString());
             return queueMap.get(tpName);
         }
         return pulsarService.getNamespaceService().getBrokerServiceUrlAsync(tpName, LookupOptions.builder().authoritative(true).build())
@@ -83,8 +88,12 @@ public class QueueServiceImpl implements QueueService {
                 return metadataService.getMetadata(QueueData.class, managedPath, false)
                     .thenCompose(queueDataOps -> {
                         if (queueDataOps.isEmpty()) {
-                            log.error("Queue:{} metadata is empty, delete and create it again", queueName);
                             return CompletableFuture.completedFuture(Optional.empty());
+                        }
+                        boolean isExclusive = queueDataOps.get().isExclusive();
+                        if (isExclusive) {
+                            log.error("Attempt to access an exclusive queue:{}", queueDataOps.get());
+                            throw new AmqpQueueException.ExclusiveQueueException();
                         }
                         CompletableFuture<Optional<Queue>> queueFuture = CompletableFuture.completedFuture(
                             Optional.of(recoveryFromMetadata(tp, queueDataOps.get())));
@@ -93,10 +102,9 @@ public class QueueServiceImpl implements QueueService {
                     });
             })
             .whenComplete((__, ex) -> {
-                ResourceLockServiceImpl.releaseResourceLock(tpName.getLookupName());
+                ResourceLockServiceImpl.releaseResourceLock(tpName.toString());
             });
     }
-
 
     @Override
     public CompletableFuture<Optional<Queue>> createQueue(String name, String tenantName, String namespaceName,
@@ -127,26 +135,70 @@ public class QueueServiceImpl implements QueueService {
                         if (topicOps.isEmpty()) {
                             return FutureUtil.failedFuture(new PulsarServerException.NotFoundException("Queue not found"));
                         }
+                        ResourceLockServiceImpl.acquireResourceLock(topicName.toString());
                         PersistentTopic topic = (PersistentTopic) topicOps.get();
                         QueueData queueData = generateQueueData(name, tenantName, namespaceName, internal,
                                 durable, autoDelete, exclusive, new HashSet<>(), arguments);
                         return metadataService.createMetadata(QueueData.class, queueData,
                                     getManagedLedgerPath(topic.getManagedLedger().getName()), false)
-                            .exceptionally(ex -> {
-                                Throwable e = FutureExceptionUtils.decodeFuture(ex);
-                                if (e instanceof MetadataStoreException.AlreadyExistsException) {
-                                    log.warn("Create Queue:{} with data:{} failed, another creation request" +
-                                        " accepted by another node has already been created", name, queueData);
-                                    return null;
-                                } else {
-                                    throw (RuntimeException) e;
-                                }
-                            })
                             .thenCompose(__ -> {
-                                return getQueue(name, tenantName, namespaceName);
+                                CompletableFuture<Optional<Queue>> queueFuture = CompletableFuture.completedFuture(
+                                    Optional.of(recoveryFromMetadata(topic, queueData)));
+                                queueMap.put(topicName, queueFuture);
+                                return queueFuture;
+                            })
+                            .whenComplete((__, ex) -> {
+                                ResourceLockServiceImpl.releaseResourceLock(topicName.toString());
                             });
                     });
             });
+    }
+
+    @Override
+    public CompletableFuture<Void> removeQueue(String queueName, String tenantName, String namespaceName) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        getQueue(queueName, tenantName, namespaceName)
+            .whenComplete((queueOps, ex) -> {
+                if (ex != null) {
+                    log.error("Failed to get topic from queue service:", ex);
+                    future.completeExceptionally(ex.getCause());
+                    return;
+                }
+                if (queueOps.isEmpty()) {
+                    log.error("Queue:{} metadata is empty, delete and create it again", queueName);
+                    future.completeExceptionally(new NotFoundException.MetadataNotFoundException("Queue metadata is empty"));
+                    return;
+                }
+                Queue queue = queueOps.get();
+                String lockName = TopicName.get(PERSISTENT_DOMAIN, tenantName, namespaceName, queueName).toString();
+                ResourceLockServiceImpl.acquireResourceLock(lockName);
+                bindService.unbindAllFromExchange(queue.getBindData())
+                    .whenComplete((__, unbindEx) -> {
+                        if (unbindEx != null) {
+                            ResourceLockServiceImpl.releaseResourceLock(lockName);
+                            future.completeExceptionally(unbindEx.getCause());
+                            return;
+                        }
+                        Topic topic = queue.getTopic();
+                        try {
+                            topic.getProducers().values().forEach(topic::removeProducer);
+                        } catch (RuntimeException e) {
+                            ResourceLockServiceImpl.releaseResourceLock(lockName);
+                            future.completeExceptionally(e);
+                            return;
+                        }
+
+                        queue.getTopic().delete().whenComplete((ignore, e) -> {
+                            ResourceLockServiceImpl.releaseResourceLock(lockName);
+                            if (e != null) {
+                                future.completeExceptionally(e);
+                            } else {
+                                future.complete(null);
+                            }
+                        });
+                    });
+            });
+        return null;
     }
 
     private void handleNotification(Notification notification) {
@@ -173,34 +225,7 @@ public class QueueServiceImpl implements QueueService {
         return queueData;
     }
 
-    @Override
-    public CompletableFuture<Void> bind(Queue queue, BindData newData) {
-        PersistentTopic topic = (PersistentTopic) queue.getTopic();
-        String path = getManagedLedgerPath(topic.getManagedLedger().getName());
-        return queue.addBindData(newData).thenCompose(__ -> {
-            return metadataService.modifyUpdateMetadata(QueueData.class, path, data -> {
-                return queue.getQueueData();
-            });
-        });
-    }
-
-    @Override
-    public CompletableFuture<Void> unbind(Queue queue, BindData newData) {
-        PersistentTopic topic = (PersistentTopic) queue.getTopic();
-        String path = getManagedLedgerPath(topic.getManagedLedger().getName());
-        return queue.removeBindData(newData).thenCompose(__ -> {
-            return metadataService.modifyUpdateMetadata(QueueData.class, path, data -> {
-                return queue.getQueueData();
-            });
-        });
-    }
-
-    @Override
-    public CompletableFuture<Void> removeQueue(String queueName, String tenantName, String namespaceName) {
-        return null;
-    }
-
-    public String getManagedLedgerPath(String ledgerName) {
-        return "/managed-ledgers/" + ledgerName;
+    public static String getManagedLedgerPath(String ledgerName) {
+        return MANAGED_LEDGER + ledgerName;
     }
 }

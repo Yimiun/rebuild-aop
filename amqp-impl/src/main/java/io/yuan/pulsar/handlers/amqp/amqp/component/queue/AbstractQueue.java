@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public abstract class AbstractQueue implements Queue {
 
@@ -39,6 +40,8 @@ public abstract class AbstractQueue implements Queue {
     protected boolean exclusive;
 
     protected Set<BindData> bindData;
+
+    protected final ReentrantReadWriteLock bindLock = new ReentrantReadWriteLock();
 
     protected final Map<String, Set<BindData>> deadLetterMap = new ConcurrentHashMap<>();
 
@@ -64,25 +67,35 @@ public abstract class AbstractQueue implements Queue {
     }
 
     @Override
-    public synchronized CompletableFuture<Void> addBindData(BindData bindData) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        if (this.bindData.add(bindData)) {
-            future.complete(null);
-        } else {
-            future.completeExceptionally(new ServiceRuntimeException.DuplicateBindException());
+    public CompletableFuture<Void> addBindData(BindData bindData) {
+        try {
+            bindLock.writeLock().lock();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            if (this.bindData.add(bindData)) {
+                future.complete(null);
+            } else {
+                future.completeExceptionally(new ServiceRuntimeException.DuplicateBindException("Duplicate bind data"));
+            }
+            return future;
+        }  finally {
+            bindLock.writeLock().unlock();
         }
-        return future;
     }
 
     @Override
-    public synchronized CompletableFuture<Void> removeBindData(BindData bindData) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        if (this.bindData.remove(bindData)) {
-            future.complete(null);
-        } else {
-            future.completeExceptionally(new NotFoundException.BindNotFoundException());
+    public CompletableFuture<Void> removeBindData(BindData bindData) {
+        try {
+            bindLock.writeLock().lock();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            if (this.bindData.remove(bindData)) {
+                future.complete(null);
+            } else {
+                future.completeExceptionally(new NotFoundException.BindNotFoundException("Bind data not found"));
+            }
+            return null;
+        } finally {
+            bindLock.writeLock().unlock();
         }
-        return null;
     }
 
     @Override

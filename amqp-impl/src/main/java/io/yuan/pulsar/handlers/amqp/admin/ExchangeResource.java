@@ -26,9 +26,9 @@ public class ExchangeResource extends BaseResource {
         Map<String, Object> res = new HashMap<>();
         getExchangeService().getExchangeMap().forEach((key, value) -> {
             if (value.isDone()) {
-                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.prefix.length()), ex.getExchangeData()));
+                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), ex.getExchangeData()));
             } else {
-                res.put(key.substring(ExchangeServiceImpl.prefix.length()), value);
+                res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), value);
             }
         });
         response.resume(res);
