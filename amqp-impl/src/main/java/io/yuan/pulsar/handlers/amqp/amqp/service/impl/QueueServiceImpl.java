@@ -171,7 +171,7 @@ public class QueueServiceImpl implements QueueService {
                     return;
                 }
                 Queue queue = queueOps.get();
-                String lockName = TopicName.get(PERSISTENT_DOMAIN, tenantName, namespaceName, queueName).toString();
+                TopicName tpName = TopicName.get(PERSISTENT_DOMAIN, tenantName, namespaceName, queueName);
                 bindService.unbindAllFromExchange(queue.getBindData())
                     .whenComplete((__, unbindEx) -> {
                         if (unbindEx != null) {
@@ -185,9 +185,13 @@ public class QueueServiceImpl implements QueueService {
                             future.completeExceptionally(e);
                             return;
                         }
-                        ResourceLockServiceImpl.acquireResourceLock(lockName);
+                        ResourceLockServiceImpl.acquireResourceLock(tpName.toString());
                         queue.getTopic().delete().whenComplete((ignore, e) -> {
-                            ResourceLockServiceImpl.releaseResourceLock(lockName);
+                            CompletableFuture<Optional<Queue>> queueFuture = queueMap.remove(tpName);
+                            if (queueFuture != null && !future.isDone()) {
+                                future.cancel(true);
+                            }
+                            ResourceLockServiceImpl.releaseResourceLock(tpName.toString());
                             if (e != null) {
                                 future.completeExceptionally(e);
                             } else {
