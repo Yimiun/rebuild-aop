@@ -47,6 +47,7 @@ public class QueueServiceImpl implements QueueService {
 
     private final BindService bindService;
 
+    // all the operation of it must be serialized! or will dirty-reading, use ResourceLock
     private final Map<TopicName, CompletableFuture<Optional<Queue>>> queueMap = new ConcurrentHashMap<>();
 
     private final Map<TopicName, CompletableFuture<Void>> autoDeleteMap = new ConcurrentHashMap<>();
@@ -171,11 +172,9 @@ public class QueueServiceImpl implements QueueService {
                 }
                 Queue queue = queueOps.get();
                 String lockName = TopicName.get(PERSISTENT_DOMAIN, tenantName, namespaceName, queueName).toString();
-                ResourceLockServiceImpl.acquireResourceLock(lockName);
                 bindService.unbindAllFromExchange(queue.getBindData())
                     .whenComplete((__, unbindEx) -> {
                         if (unbindEx != null) {
-                            ResourceLockServiceImpl.releaseResourceLock(lockName);
                             future.completeExceptionally(unbindEx.getCause());
                             return;
                         }
@@ -183,11 +182,10 @@ public class QueueServiceImpl implements QueueService {
                         try {
                             topic.getProducers().values().forEach(topic::removeProducer);
                         } catch (RuntimeException e) {
-                            ResourceLockServiceImpl.releaseResourceLock(lockName);
                             future.completeExceptionally(e);
                             return;
                         }
-
+                        ResourceLockServiceImpl.acquireResourceLock(lockName);
                         queue.getTopic().delete().whenComplete((ignore, e) -> {
                             ResourceLockServiceImpl.releaseResourceLock(lockName);
                             if (e != null) {

@@ -39,7 +39,7 @@ public class ExchangeServiceImpl implements ExchangeService {
 
     private final AmqpServiceConfiguration config;
 
-    @Getter
+    // all the operation of it must be serialized! or will dirty-reading, use ResourceLock
     private final Map<String, CompletableFuture<Optional<Exchange>>> exchangeMap = new ConcurrentHashMap<>();
 
     private final Set<String> nonPersistentSet = new ConcurrentHashSet<>();
