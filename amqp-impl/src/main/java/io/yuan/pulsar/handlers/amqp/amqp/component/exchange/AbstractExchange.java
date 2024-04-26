@@ -172,17 +172,17 @@ public abstract class AbstractExchange implements Exchange {
     }
 
     @Override
-    public boolean getDurable() {
+    public boolean isDurable() {
         return this.durable;
     }
 
     @Override
-    public boolean getAutoDelete() {
+    public boolean isAutoDelete() {
         return this.autoDelete;
     }
 
     @Override
-    public boolean getInternal() {
+    public boolean isInternal() {
         return this.internal;
     }
 

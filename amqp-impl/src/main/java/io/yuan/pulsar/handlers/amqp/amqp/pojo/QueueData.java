@@ -20,8 +20,6 @@ public class QueueData {
     @JsonProperty
     private String vhost;//namespace
     @JsonProperty
-    private boolean internal;
-    @JsonProperty
     private boolean durable;
     @JsonProperty("auto_delete")
     private boolean autoDelete;
@@ -30,5 +28,5 @@ public class QueueData {
     @JsonProperty("bind_data")
     private Set<BindData> bindsData;
     @JsonProperty
-    private Map<String, String> arguments;
+    private Map<String, Object> arguments;
 }

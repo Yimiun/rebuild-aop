@@ -2,7 +2,6 @@ package io.yuan.pulsar.handlers.amqp.admin;
 
 
 import io.yuan.pulsar.handlers.amqp.admin.view.ExchangeView;
-import io.yuan.pulsar.handlers.amqp.amqp.service.impl.ExchangeServiceImpl;
 import org.apache.pulsar.common.util.RestException;
 
 import javax.ws.rs.GET;
@@ -13,26 +12,24 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.util.HashMap;
-import java.util.Map;
 
 @Path("/exchange")
 @Produces(MediaType.APPLICATION_JSON)
 public class ExchangeResource extends BaseResource {
-
-    @GET
-    @Path("/map")
-    public void getExchangeMap(@Suspended final AsyncResponse response) {
-        Map<String, Object> res = new HashMap<>();
-        getExchangeService().getExchangeMap().forEach((key, value) -> {
-            if (value.isDone()) {
-                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), ex.getExchangeData()));
-            } else {
-                res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), value);
-            }
-        });
-        response.resume(res);
-    }
+//
+//    @GET
+//    @Path("/map")
+//    public void getExchangeMap(@Suspended final AsyncResponse response) {
+//        Map<String, Object> res = new HashMap<>();
+//        getExchangeService().getExchangeMap().forEach((key, value) -> {
+//            if (value.isDone()) {
+//                value.join().ifPresent(ex -> res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), ex.getExchangeData()));
+//            } else {
+//                res.put(key.substring(ExchangeServiceImpl.EXCHANGE_PREFIX.length()), value);
+//            }
+//        });
+//        response.resume(res);
+//    }
 
     @GET
     @Path("/{tenant}/{vhost}/{exchange}")
@@ -48,9 +45,9 @@ public class ExchangeResource extends BaseResource {
                                 ex.getType().name(),
                                 tenant,
                                 vhost,
-                                ex.getDurable(),
-                                ex.getInternal(),
-                                ex.getAutoDelete(),
+                                ex.isDurable(),
+                                ex.isInternal(),
+                                ex.isAutoDelete(),
                                 ex.getBindData(),
                                 ex.getArguments()));
                 }, () -> {

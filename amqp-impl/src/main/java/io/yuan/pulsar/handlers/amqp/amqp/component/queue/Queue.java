@@ -28,8 +28,6 @@ public interface Queue extends Router {
 
     boolean isAutoDelete();
 
-    boolean isInternal();
-
     boolean isExclusive();
 
     int getMaxPriority();

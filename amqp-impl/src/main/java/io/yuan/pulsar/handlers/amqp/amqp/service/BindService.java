@@ -54,4 +54,6 @@ public interface BindService {
     CompletableFuture<Void> bindToQueue(Queue queue, BindData newData);
 
     CompletableFuture<Void> unbindFromQueue(Queue queue, BindData newData);
+
+    CompletableFuture<Integer> checkExchangeBound(String tenant, String namespace, String exchange, String queue, String routingKey);
 }

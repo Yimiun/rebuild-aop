@@ -31,6 +31,4 @@ public interface ExchangeService {
 
     void close();
 
-    void removeAllExchangesAsync(String tenantName, String namespaceName);
-
 }

@@ -49,11 +49,11 @@ public interface Exchange extends Router {
 
     String getName();
 
-    boolean getDurable();
+    boolean isDurable();
 
-    boolean getAutoDelete();
+    boolean isAutoDelete();
 
-    boolean getInternal();
+    boolean isInternal();
 
     Map<String, Object> getArguments();
 

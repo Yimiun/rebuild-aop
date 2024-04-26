@@ -1,6 +1,6 @@
 package io.yuan.pulsar.handlers.amqp.proxy;
 
-public class ProxyLookupException extends Exception{
+public class ProxyLookupException extends RuntimeException {
 
     public ProxyLookupException() {
         super();

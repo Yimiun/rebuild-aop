@@ -143,7 +143,7 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
             .whenComplete((__, ex) -> {
                 if (ex != null) {
                     log.error("[{}][{}] Delete exchange failed, metadata service wrong.", namespaceName, exchangeName);
-                    String sb = "Delete exchange:" + exchangeName + "failed, metadata service wrong!";
+                    String sb = "Delete exchange:" + exchangeName + "failed, metadata service wrong!" + ex.getMessage();
                     handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.RESOURCE_ERROR, sb);
                 } else {
                     ExchangeDeleteOkBody responseBody = connection.getMethodRegistry().createExchangeDeleteOkBody();
@@ -153,13 +153,81 @@ public class AmqpChannel implements ServerChannelMethodProcessor {
     }
 
     @Override
-    public void receiveExchangeBound(AMQShortString amqShortString, AMQShortString amqShortString1, AMQShortString amqShortString2) {
-
+    public void receiveExchangeBound(AMQShortString exchange, AMQShortString routingKey, AMQShortString queue) {
+        if (log.isDebugEnabled()) {
+            log.debug("RECV[{}] ExchangeBound[ exchange: {}, routingKey: {}, queue:{} ]", channelId, exchange,
+                routingKey, queue);
+        }
+        String exchangeName = AMQShortString.toString(exchange);
+        String queueName = AMQShortString.toString(queue);
+        String rk = AMQShortString.toString(routingKey);
+        bindService.checkExchangeBound(namespaceName.getTenant(), namespaceName.getLocalName(), exchangeName, queueName, rk)
+            .whenComplete((code, ex) -> {
+                if (ex != null) {
+                    log.error("Failed to bound queue {} to exchange {} with routingKey {} in vhost {}",
+                        queueName, exchangeName, routingKey, connection.getNamespaceName(), ex.getCause());
+                    handleAoPException(ExceptionType.CLOSING_CHANNEL, INTERNAL_ERROR, ex.getCause().getMessage());
+                    return;
+                }
+                String reply = null;
+                switch (code) {
+                    case ExchangeBoundOkBody.EXCHANGE_NOT_FOUND:
+                        reply = "Exchange '" + exchangeName + "' not found in vhost "
+                            + connection.getNamespaceName();
+                        break;
+                    case ExchangeBoundOkBody.QUEUE_NOT_FOUND:
+                        reply = "Queue '" + queueName + "' not found in vhost "
+                            + connection.getNamespaceName();
+                        break;
+                    case ExchangeBoundOkBody.QUEUE_NOT_BOUND:
+                        reply = "Queue '" + queueName + "' has no bound in vhost "
+                            + connection.getNamespaceName();
+                        break;
+                    case ExchangeBoundOkBody.NO_QUEUE_BOUND_WITH_RK:
+                        reply = "No queue bind with this routingKey " + routingKey;
+                        break;
+                    case ExchangeBoundOkBody.SPECIFIC_QUEUE_NOT_BOUND_WITH_RK:
+                        reply = "Queue'" + queueName + "' is not bind with this routingKey " + routingKey;
+                        break;
+                    case ExchangeBoundOkBody.OK:
+                        break;
+                }
+                MethodRegistry methodRegistry = connection.getMethodRegistry();
+                ExchangeBoundOkBody exchangeBoundOkBody = methodRegistry
+                    .createExchangeBoundOkBody(code, AMQShortString.validValueOf(reply));
+                connection.writeFrame(exchangeBoundOkBody.generateFrame(channelId));
+            });
     }
 
     @Override
-    public void receiveQueueDeclare(AMQShortString amqShortString, boolean b, boolean b1, boolean b2, boolean b3, boolean b4, FieldTable fieldTable) {
-
+    public void receiveQueueDeclare(AMQShortString queue, boolean passive, boolean durable, boolean exclusive,
+                                    boolean autoDelete, boolean nowait, FieldTable arguments) {
+        if (log.isDebugEnabled()) {
+            log.debug("RECV[{}] QueueDeclare[ queue: {}, passive: {}, durable:{}, "
+                    + "exclusive:{}, autoDelete:{}, nowait:{}, arguments:{} ]",
+                channelId, queue, passive, durable, exclusive, autoDelete, nowait, arguments);
+        }
+        String queueName = queue != null ? queue.toString() : "";
+        queueService.createQueue(queueName, namespaceName.getTenant(), namespaceName.getLocalName(), durable,
+            autoDelete, exclusive, FieldTable.convertToMap(arguments), 1000, 10)
+            .whenComplete((queueOpt, ex) -> {
+                if (ex != null) {
+                    Throwable real = FutureExceptionUtils.decodeFuture(ex);
+                    log.error("Exception when declaring queue:{}", queueName);
+                    handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND,
+                            "Exception when declaring queue:" + real.getMessage());
+                    return;
+                }
+                if (queueOpt.isEmpty()) {
+                    log.error("Fetch empty queue metadata :{}", queueName);
+                    handleAoPException(ExceptionType.CLOSING_CHANNEL, ErrorCodes.NOT_FOUND, "Fetch empty queue metadata");
+                    return;
+                }
+                MethodRegistry methodRegistry = connection.getMethodRegistry();
+                QueueDeclareOkBody responseBody = methodRegistry.createQueueDeclareOkBody(
+                    AMQShortString.createAMQShortString(queueOpt.get().getName()), 0, 0);
+                connection.writeFrame(responseBody.generateFrame(channelId));
+            });
     }
 
     @Override

@@ -14,8 +14,8 @@ import io.yuan.pulsar.handlers.amqp.exception.ServiceRuntimeException;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
 import io.yuan.pulsar.handlers.amqp.utils.FutureExceptionUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.pulsar.broker.service.persistent.PersistentTopic;
 import org.apache.pulsar.common.util.FutureUtil;
+import org.apache.qpid.server.protocol.v0_8.transport.ExchangeBoundOkBody;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -33,6 +33,8 @@ public class BindServiceImpl implements BindService {
 
     public static final String EXCHANGE_TYPE = "EXCHANGE";
 
+    private final AmqpBrokerService brokerService;
+
     private final ExchangeService exchangeService;
 
     private final QueueService queueService;
@@ -40,6 +42,7 @@ public class BindServiceImpl implements BindService {
     private final MetadataService metadataService;
 
     public BindServiceImpl(AmqpBrokerService brokerService) {
+        this.brokerService = brokerService;
         this.exchangeService = brokerService.getExchangeService();
         this.queueService = brokerService.getQueueService();
         this.metadataService = brokerService.getMetadataService();
@@ -48,7 +51,7 @@ public class BindServiceImpl implements BindService {
 
 
     @Override
-    public CompletableFuture<Void> bind(String tenant, String namespaceName, String source, String destination, String type,
+    public CompletableFuture<Void> bind(String tenant, String namespace, String source, String destination, String type,
                                         String bindingKey, Map<String, Object> arguments) {
         String exchangeName;
         String queueName;
@@ -59,12 +62,12 @@ public class BindServiceImpl implements BindService {
             exchangeName = destination;
             queueName = source;
         }
-        final BindData bindData = new BindData(source, tenant, namespaceName, destination,
+        final BindData bindData = new BindData(source, tenant, namespace, destination,
                 type, bindingKey, arguments, bindingKey);
 
         CompletableFuture<Void> bindFuture = new CompletableFuture<>();
-        exchangeService.getExchangeAsync(exchangeName, tenant, namespaceName)
-            .thenAcceptBoth(queueService.getQueue(queueName, tenant, namespaceName), (exchangeOps, queueOps) -> {
+        exchangeService.getExchangeAsync(exchangeName, tenant, namespace)
+            .thenAcceptBoth(queueService.getQueue(queueName, tenant, namespace), (exchangeOps, queueOps) -> {
                 if (queueOps.isEmpty()) {
                     log.error("Error when handling bind request:{}, queue not found", bindData);
                     bindFuture.completeExceptionally(new NotFoundException.QueueNotFoundException());
@@ -99,13 +102,13 @@ public class BindServiceImpl implements BindService {
     }
 
     @Override
-    public CompletableFuture<Void> unbind(String tenant, String namespaceName, String exchangeName, String queueName,
+    public CompletableFuture<Void> unbind(String tenant, String namespace, String exchangeName, String queueName,
                                           String bindingKey, Map<String, Object> arguments) {
-        final BindData bindData = new BindData(exchangeName, tenant, namespaceName, queueName,
+        final BindData bindData = new BindData(exchangeName, tenant, namespace, queueName,
                 EXCHANGE_TYPE, bindingKey, arguments, bindingKey);
         CompletableFuture<Void> bindFuture = new CompletableFuture<>();
-        exchangeService.getExchangeAsync(exchangeName, tenant, namespaceName)
-            .thenAcceptBoth(queueService.getQueue(queueName, tenant, namespaceName), (exchangeOps, queueOps) -> {
+        exchangeService.getExchangeAsync(exchangeName, tenant, namespace)
+            .thenAcceptBoth(queueService.getQueue(queueName, tenant, namespace), (exchangeOps, queueOps) -> {
                 // smart as me ^_^
                 if (exchangeOps.isEmpty()) {
                     log.error("Error when handling bind request:{}, exchange not found", bindData);
@@ -194,10 +197,12 @@ public class BindServiceImpl implements BindService {
     @Override
     public CompletableFuture<Void> bindToExchange(Exchange exchange, BindData bindData) {
         String path = ExchangeServiceImpl.generateExchangePath(exchange.getTenant(), exchange.getVhost(), exchange.getName());
+        ResourceLockServiceImpl.acquireResourceLock(path);
         return exchange.addBindData(bindData).thenCompose(__ -> {
             return metadataService.modifyUpdateMetadata(ExchangeData.class, path, data -> {
                 return exchange.getExchangeData();
             }).whenComplete((ignore, ex) -> {
+                ResourceLockServiceImpl.releaseResourceLock(path);
                 if (ex != null) {
                     exchange.removeBindData(bindData);
                 }
@@ -208,12 +213,18 @@ public class BindServiceImpl implements BindService {
     @Override
     public CompletableFuture<Void> unbindFromExchange(Exchange exchange, BindData bindData) {
         String path = ExchangeServiceImpl.generateExchangePath(exchange.getTenant(), exchange.getVhost(), exchange.getName());
+        ResourceLockServiceImpl.acquireResourceLock(path);
         return exchange.removeBindData(bindData).thenCompose(__ -> {
             return metadataService.modifyUpdateMetadata(ExchangeData.class, path, data -> {
                 return exchange.getExchangeData();
             }).whenComplete((ignore, ex) -> {
+                ResourceLockServiceImpl.releaseResourceLock(path);
                 if (ex != null) {
                     exchange.addBindData(bindData);
+                    return;
+                }
+                if (exchange.isAutoDelete() && exchange.getBindData().size() == 0) {
+                    exchangeService.removeExchangeAsync(exchange.getName(), exchange.getTenant(), exchange.getVhost());
                 }
             });
         });
@@ -221,12 +232,13 @@ public class BindServiceImpl implements BindService {
 
     @Override
     public CompletableFuture<Void> bindToQueue(Queue queue, BindData newData) {
-        PersistentTopic topic = (PersistentTopic) queue.getTopic();
-        String path = QueueServiceImpl.getManagedLedgerPath(topic.getManagedLedger().getName());
+        String path = QueueServiceImpl.generateQueuePath(queue.getTenant(), queue.getVhost(), queue.getName());
+        ResourceLockServiceImpl.acquireResourceLock(path);
         return queue.addBindData(newData).thenCompose(__ -> {
             return metadataService.modifyUpdateMetadata(QueueData.class, path, data -> {
                 return queue.getQueueData();
             }).whenComplete((ignore, ex) -> {
+                ResourceLockServiceImpl.releaseResourceLock(path);
                 if (ex != null) {
                     queue.removeBindData(newData);
                 }
@@ -236,17 +248,55 @@ public class BindServiceImpl implements BindService {
 
     @Override
     public CompletableFuture<Void> unbindFromQueue(Queue queue, BindData newData) {
-        PersistentTopic topic = (PersistentTopic) queue.getTopic();
-        String path = QueueServiceImpl.getManagedLedgerPath(topic.getManagedLedger().getName());
+        String path = QueueServiceImpl.generateQueuePath(queue.getTenant(), queue.getVhost(), queue.getName());
+        ResourceLockServiceImpl.acquireResourceLock(path);
         return queue.removeBindData(newData).thenCompose(__ -> {
             return metadataService.modifyUpdateMetadata(QueueData.class, path, data -> {
                 return queue.getQueueData();
             }).whenComplete((ignore, ex) -> {
+                ResourceLockServiceImpl.releaseResourceLock(path);
                 if (ex != null) {
                     queue.addBindData(newData);
                 }
             });
         });
+    }
+
+    @Override
+    public CompletableFuture<Integer> checkExchangeBound(String tenant, String namespace,
+                                                         String exchangeName, String queueName, String routingKey) {
+        CompletableFuture<Integer> future = new CompletableFuture<>();
+        exchangeService.getExchangeAsync(exchangeName, tenant, namespace)
+            .thenAcceptBoth(queueService.getQueue(queueName, tenant, namespace), (exchangeOpt, queueOpt) -> {
+                if (exchangeOpt.isEmpty()) {
+                    future.complete(ExchangeBoundOkBody.EXCHANGE_NOT_FOUND);
+                    return;
+                }
+                if (queueOpt.isEmpty()) {
+                    future.complete(ExchangeBoundOkBody.QUEUE_NOT_FOUND);
+                    return;
+                }
+                if (queueOpt.get().getBindData().size() == 0) {
+                    future.complete(ExchangeBoundOkBody.QUEUE_NOT_BOUND);
+                }
+                int code = ExchangeBoundOkBody.NO_QUEUE_BOUND_WITH_RK;
+                Set<BindData> bindDataSet = new HashSet<>(exchangeOpt.get().getBindData());
+                for (BindData bindData : bindDataSet) {
+                    if (bindData.getDestination().equals(queueName)) {
+                        code = ExchangeBoundOkBody.SPECIFIC_QUEUE_NOT_BOUND_WITH_RK;
+                        if (bindData.getRoutingKey().equals(routingKey)) {
+                            code = ExchangeBoundOkBody.OK;
+                            break;
+                        }
+                    }
+                }
+                future.complete(code);
+            }).exceptionally(ex -> {
+                log.error("Exception when check bound of exchange:{} with queue:{}", exchangeName, queueName);
+                future.completeExceptionally(ex.getCause());
+                return null;
+            });
+        return future;
     }
 //
 //    // process delete exchange -> unbind from queue/ delete queue -> unbind from exchange.

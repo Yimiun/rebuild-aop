@@ -35,8 +35,6 @@ public abstract class AbstractQueue implements Queue {
 
     protected boolean autoDelete;
 
-    protected boolean internal;
-
     protected boolean exclusive;
 
     protected Set<BindData> bindData;
@@ -45,7 +43,7 @@ public abstract class AbstractQueue implements Queue {
 
     protected final Map<String, Set<BindData>> deadLetterMap = new ConcurrentHashMap<>();
 
-    protected final Map<String, String> arguments;
+    protected final Map<String, Object> arguments;
 
     public AbstractQueue(Topic topic, QueueData queueData) {
         this.queueData = queueData;
@@ -55,7 +53,6 @@ public abstract class AbstractQueue implements Queue {
         this.namespace = queueData.getVhost();
         this.durable = queueData.isDurable();
         this.autoDelete = queueData.isAutoDelete();
-        this.internal = queueData.isInternal();
         this.exclusive = queueData.isExclusive();
         this.bindData = queueData.getBindsData();
         this.arguments = queueData.getArguments();
@@ -150,7 +147,7 @@ public abstract class AbstractQueue implements Queue {
 
     @Override
     public Map<String, Object> getArguments() {
-        return null;
+        return arguments;
     }
 
     @Override
@@ -189,10 +186,6 @@ public abstract class AbstractQueue implements Queue {
 
     public boolean isAutoDelete() {
         return autoDelete;
-    }
-
-    public boolean isInternal() {
-        return internal;
     }
 
     public boolean isExclusive() {

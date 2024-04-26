@@ -12,7 +12,6 @@ import io.yuan.pulsar.handlers.amqp.exception.NotFoundException;
 import io.yuan.pulsar.handlers.amqp.exception.ServiceRuntimeException;
 import io.yuan.pulsar.handlers.amqp.metadata.MetadataService;
 import io.yuan.pulsar.handlers.amqp.utils.FutureExceptionUtils;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pulsar.broker.resources.NamespaceResources;
@@ -81,12 +80,12 @@ public class ExchangeServiceImpl implements ExchangeService {
             return exchangeMap.get(path);
         }
         return metadataService.getMetadata(ExchangeData.class, path, refresh)
-            .thenCompose(metadataOps -> {
-                if (metadataOps.isEmpty()) {
+            .thenCompose(metadataOpt -> {
+                if (metadataOpt.isEmpty()) {
                     return CompletableFuture.completedFuture(Optional.empty());
                 }
                 CompletableFuture<Optional<Exchange>> completableFuture = new CompletableFuture<>();
-                Exchange exchange = recoveryExchange(metadataOps.get());
+                Exchange exchange = recoveryExchange(metadataOpt.get());
                 completableFuture.complete(Optional.of(exchange));
                 exchangeMap.put(path, completableFuture);
                 return completableFuture;
@@ -97,15 +96,15 @@ public class ExchangeServiceImpl implements ExchangeService {
     }
 
     @Override
-    // @Todo need to handle createIfMissing
+    // @todo need to handle createIfMissing
     public CompletableFuture<Optional<Exchange>> createExchangeAsync(String name, String tenantName, String namespaceName,
                                                                      String type, boolean durable,
                                                                      boolean autoDelete, boolean internal,
                                                                      Map<String, Object> arguments) {
         return getExchangeAsync(name, tenantName, namespaceName)
-            .thenCompose(exchangeOps -> {
-                if (exchangeOps.isPresent()) {
-                    return CompletableFuture.completedFuture(exchangeOps);
+            .thenCompose(exchangeOpt -> {
+                if (exchangeOpt.isPresent()) {
+                    return CompletableFuture.completedFuture(exchangeOpt);
                 }
 
                 if (StringUtils.isBlank(name) || StringUtils.isBlank(tenantName) || StringUtils.isBlank(namespaceName)) {
@@ -136,21 +135,6 @@ public class ExchangeServiceImpl implements ExchangeService {
     public void close() {
         exchangeMap.clear();
         nonPersistentSet.clear();
-    }
-
-    @Override
-    public void removeAllExchangesAsync(String tenantName, String namespaceName) {
-        String path = generateExchangePath(tenantName, namespaceName);
-        ResourceLockServiceImpl.acquireResourceLock(path);
-        metadataService.deleteMetadataRecursive(path)
-            .whenComplete((__, ex) -> {
-                ResourceLockServiceImpl.releaseResourceLock(path, true);
-                if (ex != null) {
-                    log.error("Remove exchange metadata wrong", ex);
-                    return;
-                }
-                log.info("Successfully removed namespace path:{}", path);
-            });
     }
 
     /**
@@ -207,7 +191,8 @@ public class ExchangeServiceImpl implements ExchangeService {
             switch (notification.getType()) {
                 case Deleted:
                     handleRemoveExchange(path);
-                    log.warn("A Delete request is processed globally, so delete the exchange {} on this broker", path);
+                    log.warn("A Delete request is processed globally, so delete the exchange {} on this broker",
+                        path.substring(EXCHANGE_PREFIX.length()));
                     break;
                 case Modified:
                     break;
@@ -220,7 +205,7 @@ public class ExchangeServiceImpl implements ExchangeService {
                     case Modified:
                         break;
                     case Deleted:
-                        removeAllExchangesAsync(namespaceName.getTenant(), namespaceName.getLocalName());
+                        handleRemoveAllExchanges(namespaceName.getTenant(), namespaceName.getLocalName());
                         break;
                 }
             }
@@ -229,22 +214,29 @@ public class ExchangeServiceImpl implements ExchangeService {
     }
 
     // metadata thread run it
-    public void handleRemoveExchange(String name) {
+    public void handleRemoveExchange(String path) {
         if (log.isDebugEnabled()) {
-            log.debug("Exchange:{} has been removed from cache", name);
+            log.debug("Exchange:{} has been removed from cache", path);
         }
-        CompletableFuture<Optional<Exchange>> removeFuture = exchangeMap.remove(name);
+        CompletableFuture<Optional<Exchange>> removeFuture = exchangeMap.remove(path);
         if (removeFuture != null) {
-            if (!removeFuture.isDone() && removeFuture.completeExceptionally(new IllegalStateException())) {
-                return;
-            }
-            removeFuture.thenAccept(ops -> ops.ifPresent(Exchange::close));
+            removeFuture.thenAccept(opt -> opt.ifPresent(Exchange::close));
         }
-        metadataService.invalidPath(ExchangeData.class, name);
+        metadataService.invalidPath(ExchangeData.class, path);
     }
 
-    private void generateDefaultExchange() {
-
+    private void handleRemoveAllExchanges(String tenantName, String namespaceName) {
+        String path = generateExchangePath(tenantName, namespaceName);
+        ResourceLockServiceImpl.acquireResourceLock(path);
+        metadataService.deleteMetadataRecursive(path)
+            .whenComplete((__, ex) -> {
+                ResourceLockServiceImpl.releaseResourceLock(path, true);
+                if (ex != null) {
+                    log.error("Remove exchange metadata wrong", ex);
+                    return;
+                }
+                log.info("Successfully removed namespace path:{}", path);
+            });
     }
 
     public static String generateExchangePath(String... paras) {
